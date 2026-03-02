@@ -301,11 +301,12 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
     setLoading(true);
     let error: any;
     if (editItem.parcela_grupo_id) {
-      // Delete all installments in the same group (past, present and future)
+      // Delete this record and all future records in the same group
       ({ error } = await supabase
         .from("lancamentos")
         .delete()
-        .eq("parcela_grupo_id", editItem.parcela_grupo_id));
+        .eq("parcela_grupo_id", editItem.parcela_grupo_id)
+        .gte("data", editItem.data));
     } else {
       ({ error } = await supabase.from("lancamentos").delete().eq("id", editItem.id));
     }
@@ -315,7 +316,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
       queryClient.invalidateQueries({ queryKey: ["lancamentos"] });
       toast({
         title: editItem.parcela_grupo_id ? "Parcelas excluídas!" : "Excluído!",
-        description: editItem.parcela_grupo_id ? "Todas as parcelas da compra foram removidas." : undefined,
+        description: editItem.parcela_grupo_id ? "Esta e todas as parcelas futuras foram removidas." : undefined,
       });
       onOpenChange(false);
     }
