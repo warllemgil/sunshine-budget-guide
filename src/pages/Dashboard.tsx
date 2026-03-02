@@ -142,12 +142,11 @@ const Dashboard = () => {
   const deleteLancamento = useMutation({
     mutationFn: async (l: Tables<"lancamentos">) => {
       if (l.parcela_grupo_id) {
-        // Delete this record and all future records in the same group
+        // Delete all installments in the same group (past, present and future)
         const { error } = await supabase
           .from("lancamentos")
           .delete()
-          .eq("parcela_grupo_id", l.parcela_grupo_id)
-          .gte("data", l.data);
+          .eq("parcela_grupo_id", l.parcela_grupo_id);
         if (error) throw error;
       } else {
         const { error } = await supabase.from("lancamentos").delete().eq("id", l.id);
@@ -158,7 +157,7 @@ const Dashboard = () => {
       qc.invalidateQueries({ queryKey: ["lancamentos"] });
       toast({
         title: l.parcela_grupo_id ? "Parcelas removidas!" : "Compra removida!",
-        description: l.parcela_grupo_id ? "Esta e todas as parcelas futuras foram excluídas." : undefined,
+        description: l.parcela_grupo_id ? "Todas as parcelas da compra foram excluídas." : undefined,
       });
     },
     onError: (err: any) => {
@@ -454,7 +453,7 @@ const Dashboard = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir parcelamento</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação irá excluir esta parcela e todas as parcelas futuras do mesmo parcelamento. Deseja continuar?
+              Esta ação irá excluir todas as parcelas do mesmo parcelamento (incluindo meses anteriores). Deseja continuar?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
