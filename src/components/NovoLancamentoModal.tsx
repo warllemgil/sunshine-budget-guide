@@ -355,8 +355,21 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
                 onChange={(e) => setValor(e.target.value)} required />
             </div>
             <div className="space-y-2">
-              <Label>Data</Label>
+              <Label>{metodo === "cartao" ? "Data da Compra" : "Data"}</Label>
               <Input type="date" value={data} onChange={(e) => setData(e.target.value)} required />
+              {metodo === "cartao" && cartaoId && data && (() => {
+                const selectedCartao = cartoes.find((c) => c.id === cartaoId);
+                const diaFechamento = selectedCartao?.dia_fechamento ?? 31;
+                const effectiveDate = getEffectiveInvoiceDate(data, diaFechamento);
+                const effectiveDateObj = new Date(effectiveDate + "T00:00:00");
+                if (isNaN(effectiveDateObj.getTime())) return null;
+                const effectiveMonth = effectiveDateObj.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+                return (
+                  <p className="text-[10px] text-muted-foreground leading-tight">
+                    📅 Fatura de <span className="font-medium text-primary">{effectiveMonth}</span>
+                  </p>
+                );
+              })()}
             </div>
           </div>
 

@@ -710,6 +710,19 @@ const PagarFaturaModal = ({ open, onOpenChange, cartaoId, userId, mes, ano, valo
   const [receiptPath, setReceiptPath] = useState<string>('');
   const [receiptFileName, setReceiptFileName] = useState<string>('');
 
+  // Reset/pre-fill receipt state whenever the modal opens or the existing invoice changes
+  useEffect(() => {
+    if (open) {
+      setReceiptPath(faturaExistente?.comprovante_url || '');
+      setReceiptFileName(faturaExistente?.comprovante_url ? 'Comprovante' : '');
+    }
+  }, [open, faturaExistente]);
+
+  // Reset the payment amount field each time the modal opens fresh
+  useEffect(() => {
+    if (open) setValorPago("");
+  }, [open]);
+
   const handlePagar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cartaoId) return;
