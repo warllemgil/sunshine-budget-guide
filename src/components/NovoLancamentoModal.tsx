@@ -16,6 +16,7 @@ import type { Tables, TablesInsert } from "@/integrations/supabase/types";
 import { ReceiptUploadButton } from '@/components/ReceiptUploadButton';
 import { ReceiptViewer } from '@/components/ReceiptViewer';
 import { useReceipts } from '@/hooks/useReceipts';
+import BrandLogo from '@/components/BrandLogo';
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -42,6 +43,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
   const [cartaoId, setCartaoId] = useState("");
   const [totalParcelas, setTotalParcelas] = useState("1");
   const [loja, setLoja] = useState("");
+  const [debouncedLoja, setDebouncedLoja] = useState("");
   const [cartoes, setCartoes] = useState<Tables<"cartoes">[]>([]);
   const [loading, setLoading] = useState(false);
   // Estados para comprovante
@@ -73,6 +75,12 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sharedFile, user]);
+
+  // Debounce loja changes so the logo API is not called on every keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedLoja(loja), 500);
+    return () => clearTimeout(timer);
+  }, [loja]);
 
   useEffect(() => {
     if (editItem) {
@@ -431,7 +439,10 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
 
           <div className="space-y-2">
             <Label>Loja (opcional)</Label>
-            <Input value={loja} onChange={(e) => setLoja(e.target.value)} />
+            <div className="flex items-center gap-2">
+              <Input value={loja} onChange={(e) => setLoja(e.target.value)} className="flex-1" />
+              {debouncedLoja && <BrandLogo store={debouncedLoja} size={32} />}
+            </div>
           </div>
 
           {/* SEÇÃO DE COMPROVANTE */}

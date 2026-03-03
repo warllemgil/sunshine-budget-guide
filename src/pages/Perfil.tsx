@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/formatters";
 import { User, CreditCard, Plus, Trash2, Edit2, LogOut, Check, X } from "lucide-react";
 import type { Tables, TablesInsert } from "@/integrations/supabase/types";
+import BrandLogo from "@/components/BrandLogo";
 
 const Perfil = () => {
   const { user, signOut } = useAuth();
@@ -168,6 +169,7 @@ const CartaoModal = ({ open, onOpenChange, editItem, userId }: CartaoModalProps)
   const { toast } = useToast();
   const qc = useQueryClient();
   const [instituicao, setInstituicao] = useState("");
+  const [debouncedInstituicao, setDebouncedInstituicao] = useState("");
   const [bandeira, setBandeira] = useState("");
   const [finalCartao, setFinalCartao] = useState("");
   const [limite, setLimite] = useState("");
@@ -188,6 +190,12 @@ const CartaoModal = ({ open, onOpenChange, editItem, userId }: CartaoModalProps)
       setLimite(""); setDiaFech("1"); setDiaVenc("10");
     }
   }, [editItem, open]);
+
+  // Debounce instituicao changes so the logo API is not called on every keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedInstituicao(instituicao), 500);
+    return () => clearTimeout(timer);
+  }, [instituicao]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -221,7 +229,13 @@ const CartaoModal = ({ open, onOpenChange, editItem, userId }: CartaoModalProps)
           <DialogTitle>{editItem ? "Editar Cartão" : "Novo Cartão"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="space-y-1"><Label>Instituição</Label><Input value={instituicao} onChange={(e) => setInstituicao(e.target.value)} required /></div>
+          <div className="space-y-1">
+            <Label>Instituição</Label>
+            <div className="flex items-center gap-2">
+              <Input value={instituicao} onChange={(e) => setInstituicao(e.target.value)} required className="flex-1" />
+              {debouncedInstituicao && <BrandLogo store={debouncedInstituicao} size={32} />}
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1"><Label>Bandeira</Label><Input value={bandeira} onChange={(e) => setBandeira(e.target.value)} placeholder="Visa, Master..." /></div>
             <div className="space-y-1"><Label>Final</Label><Input value={finalCartao} onChange={(e) => setFinalCartao(e.target.value)} maxLength={4} placeholder="1234" /></div>
