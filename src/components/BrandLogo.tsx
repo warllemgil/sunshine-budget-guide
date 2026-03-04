@@ -74,17 +74,26 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28 }: BrandLogoProp
   }, [store]);
 
   const handleError = () => {
-    if (fallbackStep < 2) {
-      const slug = toSlug(store);
-      const clientId = getClientId();
-      // Ordered list of fallback URLs to try before giving up.
-      // Google Favicon API (tier 3) requires no API key and covers most domains.
-      const fallbacks: string[] = [
-        clientId
-          ? `https://cdn.brandfetch.io/${slug}.com.br/w/56/h/56?c=${clientId}`
-          : `https://logo.clearbit.com/${slug}.com.br`,
-        `https://www.google.com/s2/favicons?domain=${slug}.com.br&sz=64`,
-      ];
+    const slug = toSlug(store);
+    const clientId = getClientId();
+    // First word of the store name (e.g. "amazon" from "Amazon Prime Video").
+    // Useful when the full concatenated slug doesn't match a real domain.
+    // Hyphens are preserved so compound names like "Coca-Cola" → "coca-cola.com".
+    const firstWord = store.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9-]/g, "");
+
+    // Ordered list of fallback URLs to try before giving up:
+    // 1. Clearbit/CDN for the first-word domain (.com) — catches multi-word brand names.
+    // 2. Google Favicon for the full-slug domain (.com) — covers most international brands.
+    // 3. Google Favicon for the .com.br domain — covers Brazilian stores.
+    const fallbacks: string[] = [
+      clientId
+        ? `https://cdn.brandfetch.io/${firstWord}.com/w/56/h/56?c=${clientId}`
+        : `https://logo.clearbit.com/${firstWord}.com`,
+      `https://www.google.com/s2/favicons?domain=${slug}.com&sz=64`,
+      `https://www.google.com/s2/favicons?domain=${slug}.com.br&sz=64`,
+    ];
+
+    if (fallbackStep < fallbacks.length) {
       setLogoSrc(fallbacks[fallbackStep]);
       setFallbackStep((prev) => prev + 1);
     } else {

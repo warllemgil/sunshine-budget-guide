@@ -28,13 +28,24 @@ export async function searchBrandfetchDomain(storeName: string): Promise<string 
       `https://api.brandfetch.io/v2/search/${encodeURIComponent(storeName)}`,
       { headers: { Authorization: `Bearer ${apiKey}` } },
     );
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.warn(
+        `[Brandfetch] Search API returned ${response.status} for "${storeName}". ` +
+        `Check that VITE_BRANDFETCH_API_KEY is valid and the request URL is correct.`,
+      );
+      return null;
+    }
 
     const results: Array<{ domain?: string }> = await response.json();
     const domain = results?.[0]?.domain ?? null;
-    if (domain) domainCache.set(cacheKey, domain);
+    if (domain) {
+      domainCache.set(cacheKey, domain);
+    } else {
+      console.warn(`[Brandfetch] No domain found for "${storeName}" in API response.`);
+    }
     return domain;
-  } catch {
+  } catch (err) {
+    console.warn(`[Brandfetch] Network error while searching for "${storeName}":`, err);
     return null;
   }
 }
