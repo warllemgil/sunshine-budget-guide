@@ -27,6 +27,7 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28 }: BrandLogoProp
   const [logoSrc, setLogoSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [fallbackStep, setFallbackStep] = useState(0);
+  const [loading, setLoading] = useState(!!store);
 
   const toSlug = (name: string) =>
     name
@@ -45,11 +46,13 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28 }: BrandLogoProp
       setLogoSrc(null);
       setFailed(false);
       setFallbackStep(0);
+      setLoading(false);
       return;
     }
     setFailed(false);
     setFallbackStep(0);
     setLogoSrc(null);
+    setLoading(true);
 
     const slug = toSlug(store);
     const clientId = getClientId();
@@ -65,6 +68,7 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28 }: BrandLogoProp
       } else {
         setLogoSrc(`https://logo.clearbit.com/${effectiveDomain}`);
       }
+      setLoading(false);
     });
     return () => { cancelled = true; };
   }, [store]);
@@ -89,6 +93,15 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28 }: BrandLogoProp
   };
 
   const style = { width: size, height: size };
+
+  if (loading) {
+    return (
+      <div
+        className="rounded-md flex-shrink-0 bg-muted animate-pulse"
+        style={style}
+      />
+    );
+  }
 
   if (failed || !logoSrc) {
     if (!fallbackIcon) return null;
