@@ -118,6 +118,7 @@ export type Database = {
           fixo: boolean
           id: string
           loja: string | null
+          merchant_logo_url: string | null
           metodo: string
           parcela_atual: number | null
           parcela_grupo_id: string | null
@@ -138,6 +139,7 @@ export type Database = {
           fixo?: boolean
           id?: string
           loja?: string | null
+          merchant_logo_url?: string | null
           metodo?: string
           parcela_atual?: number | null
           parcela_grupo_id?: string | null
@@ -158,6 +160,7 @@ export type Database = {
           fixo?: boolean
           id?: string
           loja?: string | null
+          merchant_logo_url?: string | null
           metodo?: string
           parcela_atual?: number | null
           parcela_grupo_id?: string | null
