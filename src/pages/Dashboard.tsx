@@ -327,7 +327,7 @@ const Dashboard = () => {
                       {/* Left: store logo + description */}
                       <div className="flex items-center gap-1.5 flex-1 min-w-0">
                         {l.loja ? (
-                          <BrandLogo store={l.loja} fallbackIcon={<Icon className="h-3.5 w-3.5" style={{ color: cat.color }} />} fallbackBg={cat.color + "20"} />
+                          <BrandLogo store={l.loja} initialUrl={l.merchant_logo_url} fallbackIcon={<Icon className="h-3.5 w-3.5" style={{ color: cat.color }} />} fallbackBg={cat.color + "20"} />
                         ) : (
                           <div className="flex h-7 w-7 items-center justify-center rounded-md flex-shrink-0" style={{ backgroundColor: cat.color + "20" }}>
                             <Icon className="h-3.5 w-3.5" style={{ color: cat.color }} />
@@ -508,7 +508,7 @@ const LancamentoRow = ({ item, onClick }: { item: Tables<"lancamentos">; onClick
   return (
     <button onClick={onClick} className="flex w-full items-center gap-3 rounded-lg bg-card p-3 text-left shadow-sm hover:shadow-md transition-shadow border border-border">
       {item.loja ? (
-        <BrandLogo store={item.loja} size={36} fallbackIcon={<Icon className="h-4 w-4" style={{ color: cat.color }} />} fallbackBg={cat.color + "20"} />
+        <BrandLogo store={item.loja} initialUrl={item.merchant_logo_url} size={36} fallbackIcon={<Icon className="h-4 w-4" style={{ color: cat.color }} />} fallbackBg={cat.color + "20"} />
       ) : (
         <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: cat.color + "20" }}>
           <Icon className="h-4 w-4" style={{ color: cat.color }} />

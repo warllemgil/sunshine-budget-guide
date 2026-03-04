@@ -16,6 +16,10 @@ interface BrandLogoProps {
   fallbackBg?: string;
   /** Size in pixels (width = height). Defaults to 28 (7 × 4 px). */
   size?: number;
+  /** Pre-resolved logo URL. When provided the component renders it immediately without any cache or API lookup. */
+  initialUrl?: string | null;
+  /** Called whenever a logo URL is resolved (including via initialUrl). Useful for the parent to persist the URL. */
+  onLogoResolved?: (url: string | null) => void;
 }
 
 /**
@@ -32,7 +36,7 @@ interface BrandLogoProps {
  * updated for all matching lancamentos rows — all in the background so the
  * UI is not blocked.
  */
-const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28 }: BrandLogoProps) => {
+const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28, initialUrl, onLogoResolved }: BrandLogoProps) => {
   const [logoSrc, setLogoSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(!!store);
@@ -64,6 +68,15 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28 }: BrandLogoProp
     setLogoSrc(null);
     setLoading(true);
 
+    // ── Fast path: use a pre-resolved URL supplied by the parent ─────────────
+    if (initialUrl) {
+      isExternalUrlRef.current = false;
+      setLogoSrc(initialUrl);
+      setLoading(false);
+      onLogoResolved?.(initialUrl);
+      return;
+    }
+
     let cancelled = false;
 
     (async () => {
@@ -75,6 +88,7 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28 }: BrandLogoProp
         isExternalUrlRef.current = false;
         setLogoSrc(cached);
         setLoading(false);
+        onLogoResolved?.(cached);
         return;
       }
 
@@ -90,6 +104,7 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28 }: BrandLogoProp
         isExternalUrlRef.current = false;
         setLogoSrc(supabaseUrl);
         setLoading(false);
+        onLogoResolved?.(supabaseUrl);
         return;
       }
 
@@ -112,6 +127,7 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28 }: BrandLogoProp
       isExternalUrlRef.current = true;
       setLogoSrc(externalUrl);
       setLoading(false);
+      onLogoResolved?.(externalUrl);
     })();
 
     return () => {
@@ -121,7 +137,7 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28 }: BrandLogoProp
         blobUrlRef.current = null;
       }
     };
-  }, [store]);
+  }, [store, initialUrl, onLogoResolved]);
 
   const handleImageLoad = () => {
     // Only upload to Supabase when the logo was resolved via an external API.
