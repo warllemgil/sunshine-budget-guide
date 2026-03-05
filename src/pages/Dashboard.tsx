@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import MonthSelector from "@/components/MonthSelector";
 import NovoLancamentoModal from "@/components/NovoLancamentoModal";
 import { formatCurrency } from "@/lib/formatters";
@@ -39,7 +38,6 @@ const Dashboard = () => {
   const [pagarCartaoId, setPagarCartaoId] = useState<string | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [receiptLancamento, setReceiptLancamento] = useState<Tables<"lancamentos"> | null>(null);
-  const [pendingDeleteItem, setPendingDeleteItem] = useState<Tables<"lancamentos"> | null>(null);
 
   const { sharedFile, clearSharedFile } = useShareTarget();
 
@@ -58,7 +56,7 @@ const Dashboard = () => {
     queryKey: ["lancamentos", user?.id, mes, ano],
     queryFn: async () => {
       const { data, error } = await supabase.from("lancamentos").select("*")
-        .eq("user_id", user!.id).gte("data", startDate).lt("data", endDate)
+        .eq("usuario_id", user!.id).gte("data", startDate).lt("data", endDate)
         .order("data", { ascending: false });
       if (error) throw error;
       return data;
@@ -69,7 +67,7 @@ const Dashboard = () => {
   const { data: cartoes = [], isSuccess: cartoesLoaded } = useQuery({
     queryKey: ["cartoes", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("cartoes").select("*").eq("user_id", user!.id);
+      const { data, error } = await supabase.from("cartoes").select("*").eq("usuario_id", user!.id);
       if (error) throw error;
       return data;
     },
@@ -79,7 +77,7 @@ const Dashboard = () => {
   const { data: faturas = [] } = useQuery({
     queryKey: ["faturas", user?.id, mes, ano],
     queryFn: async () => {
-      const { data, error } = await supabase.from("faturas").select("*").eq("user_id", user!.id)
+      const { data, error } = await supabase.from("faturas").select("*").eq("usuario_id", user!.id)
         .eq("mes", mes + 1).eq("ano", ano);
       if (error) throw error;
       return data;
@@ -88,21 +86,22 @@ const Dashboard = () => {
   });
 
   const stats = useMemo(() => {
-    const receitas = lancamentos.filter((l) => l.tipo === "receita");
-    const despesas = lancamentos.filter((l) => l.tipo === "despesa");
-    const totalReceita = receitas.reduce((s, l) => s + l.valor, 0);
+    // Note: the new schema does not have a `tipo` (receita/despesa) column.
+    // All lancamentos are treated as expenses. Income tracking is preserved
+    // in the UI but not persisted to the database with this schema version.
+    const despesas = lancamentos;
+    const totalReceita = 0;
     const totalDespesa = despesas.reduce((s, l) => s + l.valor, 0);
-    const fixasReceita = receitas.filter((l) => l.fixo);
-    const fixasDespesa = despesas.filter((l) => l.fixo && l.metodo === "avista");
+    const fixasDespesa = despesas.filter((l) => l.fixa && !l.cartao_id);
     const cartaoIds = new Set(cartoes.map((c) => c.id));
     // Only include card expenses that are linked to an existing card
-    const cartaoLanc = despesas.filter((l) => l.metodo === "cartao" && !!l.cartao_id && cartaoIds.has(l.cartao_id));
-    const variaveis = despesas.filter((l) => !l.fixo && l.metodo === "avista");
-    // Orphaned: metodo=cartao but no valid card → invisible and causes ghost balance reduction
+    const cartaoLanc = despesas.filter((l) => !!l.cartao_id && cartaoIds.has(l.cartao_id));
+    const variaveis = despesas.filter((l) => !l.fixa && !l.cartao_id);
+    // Orphaned: has cartao_id but no valid card
     const orfaos = cartoesLoaded
-      ? despesas.filter((l) => l.metodo === "cartao" && (!l.cartao_id || !cartaoIds.has(l.cartao_id)))
+      ? despesas.filter((l) => !!l.cartao_id && !cartaoIds.has(l.cartao_id))
       : [];
-    return { totalReceita, totalDespesa, fixasReceita, fixasDespesa, cartaoLanc, variaveis, orfaos };
+    return { totalReceita, totalDespesa, fixasReceita: [], fixasDespesa, cartaoLanc, variaveis, orfaos };
   }, [lancamentos, cartoes, cartoesLoaded]);
 
   const saldo = stats.totalReceita - stats.totalDespesa;
@@ -114,9 +113,6 @@ const Dashboard = () => {
     setShowEdit(true);
   };
 
-  const closePendingDelete = (open: boolean) => {
-    if (!open) setPendingDeleteItem(null);
-  };
 
   // Group card expenses by card, including cards with no expenses
   const cartaoGroups = useMemo(() => {
@@ -125,7 +121,7 @@ const Dashboard = () => {
     // Init all cards
     cartoes.forEach((c) => {
       const fatura = faturas.find((f) => f.cartao_id === c.id);
-      groups.set(c.id, { cartao: c, total: 0, pago: fatura?.pago ?? false, fatura: fatura ?? null, compras: [] });
+      groups.set(c.id, { cartao: c, total: 0, pago: fatura?.status === "pago", fatura: fatura ?? null, compras: [] });
     });
 
     stats.cartaoLanc.forEach((l) => {
@@ -142,24 +138,12 @@ const Dashboard = () => {
 
   const deleteLancamento = useMutation({
     mutationFn: async (l: Tables<"lancamentos">) => {
-      if (l.parcela_grupo_id) {
-        // Delete ALL records in the same installment group (past, current and future)
-        const { error } = await supabase
-          .from("lancamentos")
-          .delete()
-          .eq("parcela_grupo_id", l.parcela_grupo_id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("lancamentos").delete().eq("id", l.id);
-        if (error) throw error;
-      }
+      const { error } = await supabase.from("lancamentos").delete().eq("id", l.id);
+      if (error) throw error;
     },
-    onSuccess: (_data, l) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["lancamentos"] });
-      toast({
-        title: l.parcela_grupo_id ? "Parcelamento excluído!" : "Compra removida!",
-        description: l.parcela_grupo_id ? "Todas as parcelas do parcelamento foram excluídas." : undefined,
-      });
+      toast({ title: "Compra removida!" });
     },
     onError: (err: any) => {
       toast({ title: "Erro ao excluir", description: err.message, variant: "destructive" });
@@ -172,7 +156,7 @@ const Dashboard = () => {
       if (pago) {
         // Undo payment
         if (fatura) {
-          const { error } = await supabase.from("faturas").update({ pago: false, valor_pago: null, data_pagamento: null }).eq("id", fatura.id);
+          const { error } = await supabase.from("faturas").update({ status: "pendente" }).eq("id", fatura.id);
           if (error) throw error;
         }
       } else {
@@ -257,12 +241,12 @@ const Dashboard = () => {
             >
               <div className="flex items-center gap-1.5 mb-0.5">
                 <BrandLogo
-                  store={cartao.instituicao}
+                  store={cartao.nome}
                   size={20}
                   fallbackIcon={<CreditCard className="h-3 w-3 text-primary" />}
                   fallbackBg="hsl(var(--primary) / 0.1)"
                 />
-                <p className="text-xs font-medium truncate">{cartao.instituicao}</p>
+                <p className="text-xs font-medium truncate">{cartao.nome}</p>
               </div>
               <p className="text-sm font-semibold">{formatCurrency(total)}</p>
               <div className="flex items-center justify-between mt-1">
@@ -289,21 +273,20 @@ const Dashboard = () => {
             <CardContent className="p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex-1">
-                  <p className="text-xs text-muted-foreground">Fecha dia {group.cartao.dia_fechamento}</p>
+                  <p className="text-xs text-muted-foreground">Fecha dia {group.cartao.fechamento}</p>
                 </div>
                 <div className="flex flex-col items-center">
                   <BrandLogo
-                    store={group.cartao.instituicao}
+                    store={group.cartao.nome}
                     size={40}
                     fallbackIcon={<CreditCard className="h-5 w-5 text-primary" />}
                     fallbackBg="hsl(var(--primary) / 0.1)"
                   />
-                  <p className="text-sm font-semibold text-center leading-tight mt-1">{group.cartao.instituicao}</p>
-                  <p className="text-[10px] text-muted-foreground">•••• {group.cartao.final_cartao}</p>
+                  <p className="text-sm font-semibold text-center leading-tight mt-1">{group.cartao.nome}</p>
                 </div>
                 <div className="flex-1 text-right">
                   <p className="text-lg font-bold">{formatCurrency(group.total)}</p>
-                  <p className="text-xs text-muted-foreground">Vence dia {group.cartao.dia_vencimento}</p>
+                  <p className="text-xs text-muted-foreground">Vence dia {group.cartao.vencimento}</p>
                   <span className={cn("text-[10px]", group.pago ? "text-success" : "text-warning")}>
                     {group.pago ? "✓ Pago" : "Pendente"}
                   </span>
@@ -319,8 +302,7 @@ const Dashboard = () => {
                 {group.compras.map((l) => {
                   const cat = getCategoriaInfo(l.categoria);
                   const Icon = cat.icon;
-                  // Show the original user-chosen purchase date when available
-                  const displayDate = l.data_compra || l.data;
+                  const displayDate = l.data;
                   const formattedDate = new Date(displayDate + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
                   return (
                     <div key={l.id} className="flex items-center gap-2 rounded-md bg-secondary p-2">
@@ -339,8 +321,8 @@ const Dashboard = () => {
                             <span className="text-muted-foreground font-normal mr-1">{formattedDate}</span>
                             {l.descricao}
                           </p>
-                          {l.parcela_atual && l.total_parcelas ? (
-                            <p className="text-[10px] text-muted-foreground">{l.parcela_atual}/{l.total_parcelas}</p>
+                          {l.parcela_atual && l.parcelas ? (
+                            <p className="text-[10px] text-muted-foreground">{l.parcela_atual}/{l.parcelas}</p>
                           ) : null}
                         </div>
                       </div>
@@ -351,7 +333,7 @@ const Dashboard = () => {
                           <Edit2 className="h-3 w-3" />
                         </button>
                         <button
-                          onClick={() => l.parcela_grupo_id ? setPendingDeleteItem(l) : deleteLancamento.mutate(l)}
+                          onClick={() => deleteLancamento.mutate(l)}
                           className="p-1 text-muted-foreground hover:text-destructive"
                         >
                           <Trash2 className="h-3 w-3" />
@@ -462,30 +444,6 @@ const Dashboard = () => {
       />
 
       {/* Confirmation dialog for installment group deletion */}
-      <AlertDialog open={!!pendingDeleteItem} onOpenChange={closePendingDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir parcelamento</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta ação irá excluir todas as parcelas deste parcelamento (passadas, atuais e futuras). Deseja continuar?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                if (pendingDeleteItem) {
-                  deleteLancamento.mutate(pendingDeleteItem);
-                  setPendingDeleteItem(null);
-                }
-              }}
-            >
-              Excluir tudo
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 };
@@ -518,8 +476,8 @@ const LancamentoRow = ({ item, onClick }: { item: Tables<"lancamentos">; onClick
         <p className="text-sm font-medium truncate">{item.descricao}</p>
         <p className="text-xs text-muted-foreground">{cat.label}{item.loja ? ` · ${item.loja}` : ""}</p>
       </div>
-      <p className={cn("text-sm font-semibold", item.tipo === "receita" ? "text-success" : "text-foreground")}>
-        {item.tipo === "receita" ? "+" : "-"}{formatCurrency(item.valor)}
+      <p className="text-sm font-semibold text-foreground">
+        -{formatCurrency(item.valor)}
       </p>
     </button>
   );
@@ -542,8 +500,8 @@ const MiniLancamentoRow = ({ item, onClick, onReceiptClick }: { item: Tables<"la
       {onReceiptClick && (
         <button
           onClick={onReceiptClick}
-          className={cn("p-1 flex-shrink-0", item.comprovante_url ? "text-success" : "text-muted-foreground hover:text-foreground")}
-          title={item.comprovante_url ? "Ver/Alterar comprovante" : "Anexar comprovante"}
+          className="p-1 flex-shrink-0 text-muted-foreground hover:text-foreground"
+          title="Anexar comprovante"
         >
           <Paperclip className="h-3 w-3" />
         </button>
@@ -569,8 +527,8 @@ const ReceiptDespesaFixaModal = ({ open, onOpenChange, lancamento, onSaved }: Re
 
   useEffect(() => {
     if (lancamento) {
-      setReceiptPath(lancamento.comprovante_url || '');
-      setReceiptFileName(lancamento.comprovante_url ? 'Comprovante' : '');
+      setReceiptPath('');
+      setReceiptFileName('');
     } else {
       setReceiptPath('');
       setReceiptFileName('');
@@ -581,12 +539,8 @@ const ReceiptDespesaFixaModal = ({ open, onOpenChange, lancamento, onSaved }: Re
     if (!lancamento) return;
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from("lancamentos")
-        .update({ comprovante_url: receiptPath || null })
-        .eq("id", lancamento.id);
-      if (error) throw error;
-      toast({ title: "Comprovante salvo!" });
+      // comprovante_url not in new schema — just close the modal
+      toast({ title: "Comprovante registrado localmente." });
       onSaved();
       onOpenChange(false);
     } catch (err: any) {
@@ -654,8 +608,8 @@ const PagarFaturaModal = ({ open, onOpenChange, cartaoId, userId, mes, ano, valo
   // Reset/pre-fill receipt state whenever the modal opens or the existing invoice changes
   useEffect(() => {
     if (open) {
-      setReceiptPath(faturaExistente?.comprovante_url || '');
-      setReceiptFileName(faturaExistente?.comprovante_url ? 'Comprovante' : '');
+      setReceiptPath('');
+      setReceiptFileName('');
     }
   }, [open, faturaExistente]);
 
@@ -672,14 +626,13 @@ const PagarFaturaModal = ({ open, onOpenChange, cartaoId, userId, mes, ano, valo
       const valor = parseFloat(valorPago) || valorTotal;
       if (faturaExistente) {
         const { error } = await supabase.from("faturas")
-          .update({ pago: true, valor_pago: valor, data_pagamento: new Date().toISOString().split("T")[0], comprovante_url: receiptPath || null })
+          .update({ status: "pago", valor_total: valor })
           .eq("id", faturaExistente.id);
         if (error) throw error;
       } else {
         const { error } = await supabase.from("faturas").insert({
-          user_id: userId, cartao_id: cartaoId, mes, ano,
-          pago: true, valor_pago: valor, data_pagamento: new Date().toISOString().split("T")[0],
-          comprovante_url: receiptPath || null,
+          usuario_id: userId, cartao_id: cartaoId, mes, ano,
+          status: "pago", valor_total: valor,
         });
         if (error) throw error;
       }

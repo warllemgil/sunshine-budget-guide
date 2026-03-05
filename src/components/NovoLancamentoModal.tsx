@@ -53,7 +53,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
 
   useEffect(() => {
     if (!user || !open) return;
-    supabase.from("cartoes").select("*").eq("user_id", user.id).then(({ data }) => {
+    supabase.from("cartoes").select("*").eq("usuario_id", user.id).then(({ data }) => {
       if (data) setCartoes(data);
     });
   }, [user, open]);
@@ -85,24 +85,23 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
 
   useEffect(() => {
     if (editItem) {
-      setTipo(editItem.tipo as "receita" | "despesa");
+      setTipo("despesa");
       // Strip the "(N/M)" installment suffix so the user edits the base description
-      const baseDescricao = editItem.parcela_atual && editItem.total_parcelas
+      const baseDescricao = editItem.parcela_atual && editItem.parcelas
         ? editItem.descricao.replace(/ \(\d+\/\d+\)$/, "")
         : editItem.descricao;
       setDescricao(baseDescricao);
       setValor(String(editItem.valor));
-      // For card purchases, prefer the original user-chosen date (data_compra) over the effective invoice date (data)
-      setData(editItem.data_compra || editItem.data);
+      setData(editItem.data);
       setCategoria(editItem.categoria);
-      setFixo(editItem.fixo);
-      setMetodo(editItem.metodo as "avista" | "cartao");
+      setFixo(editItem.fixa);
+      setMetodo(editItem.cartao_id ? "cartao" : "avista");
       setCartaoId(editItem.cartao_id || "");
-      setTotalParcelas(String(editItem.total_parcelas || 1));
+      setTotalParcelas(String(editItem.parcelas || 1));
       setLoja(editItem.loja || "");
       setMerchantLogoUrl(editItem.merchant_logo_url || null);
-      setReceiptPath(editItem.comprovante_url || "");
-      setReceiptFileName(editItem.comprovante_url ? "Comprovante" : "");
+      setReceiptPath('');
+      setReceiptFileName('');
     } else {
       resetForm();
     }
@@ -122,28 +121,6 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
     setMerchantLogoUrl(null);
     setReceiptPath("");
     setReceiptFileName("");
-  };
-
-  // Helper: strip data_compra from a payload object or array (fallback when column is missing in DB)
-  const omitDataCompra = (payload: TablesInsert<"lancamentos">): Omit<TablesInsert<"lancamentos">, "data_compra"> => {
-    const { data_compra: _dc, ...rest } = payload;
-    return rest;
-  };
-
-  // Detect whether a Supabase/PostgREST error is caused by the data_compra column not existing
-  const isDataCompraSchemaError = (err: { message?: string; code?: string } | null) =>
-    err?.message?.includes("data_compra") || err?.code === "42703" || err?.code === "PGRST204";
-
-  // Wrapper: insert and retry without data_compra if the column is not yet in the schema
-  const insertLancamentos = async (payload: TablesInsert<"lancamentos"> | TablesInsert<"lancamentos">[]) => {
-    const { error } = await supabase.from("lancamentos").insert(payload);
-    if (isDataCompraSchemaError(error)) {
-      const fallback = Array.isArray(payload) ? payload.map(omitDataCompra) : omitDataCompra(payload);
-      const { error: e2 } = await supabase.from("lancamentos").insert(fallback as TablesInsert<"lancamentos">[] | TablesInsert<"lancamentos">);
-      if (e2) throw e2;
-    } else if (error) {
-      throw error;
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -166,138 +143,78 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
         let effectiveDataEdit = data;
         if (metodo === "cartao" && cartaoId) {
           const selectedCartao = cartoes.find((c) => c.id === cartaoId);
-          const diaFechamento = selectedCartao?.dia_fechamento ?? 31;
+          const diaFechamento = selectedCartao?.fechamento ?? 31;
           effectiveDataEdit = getEffectiveInvoiceDate(data, diaFechamento);
         }
 
-        if (editItem.parcela_grupo_id && editItem.parcela_atual && editItem.total_parcelas) {
-          // Parceled purchase: update this installment and all future installments in the group.
-          // Fetch all future installments (by data >= this installment's data).
-          const { data: futureInstallments, error: fetchErr } = await supabase
-            .from("lancamentos")
-            .select("id, parcela_atual, total_parcelas, data")
-            .eq("parcela_grupo_id", editItem.parcela_grupo_id)
-            .gte("data", editItem.data)
-            .order("data", { ascending: true });
-          if (fetchErr) throw fetchErr;
-
-          await Promise.all(
-            (futureInstallments ?? []).map((inst) => {
-              const instDescricao = inst.parcela_atual && inst.total_parcelas
-                ? `${descricao} (${inst.parcela_atual}/${inst.total_parcelas})`
-                : descricao;
-              return supabase.from("lancamentos").update({
-                descricao: instDescricao,
-                valor: valorNum,
-                categoria,
-                loja,
-                comprovante_url: receiptPath || null,
-              }).eq("id", inst.id).then(({ error }) => { if (error) throw error; });
-            })
-          );
-
-          // Also update the date on the current installment
-          const datePayload = {
-            data: effectiveDataEdit,
-            data_compra: data,
-          };
-          const { error: dateErr } = await supabase.from("lancamentos").update(datePayload).eq("id", editItem.id);
-          if (isDataCompraSchemaError(dateErr)) {
-            const { error: e2 } = await supabase.from("lancamentos").update({ data: effectiveDataEdit }).eq("id", editItem.id);
-            if (e2) throw e2;
-          } else if (dateErr) {
-            throw dateErr;
-          }
-        } else {
-          const updatePayload = {
-            tipo, descricao, valor: valorNum,
-            data: effectiveDataEdit,
-            data_compra: data,
-            categoria, fixo,
-            metodo, cartao_id: metodo === "cartao" ? cartaoId || null : null,
-            total_parcelas: metodo === "cartao" ? parseInt(totalParcelas) : null,
-            loja, comprovante_url: receiptPath || null,
-            merchant_logo_url: merchantLogoUrl || null,
-          };
-          const { error } = await supabase.from("lancamentos").update(updatePayload).eq("id", editItem.id);
-          if (isDataCompraSchemaError(error)) {
-            const { error: e2 } = await supabase
-              .from("lancamentos")
-              .update(omitDataCompra(updatePayload))
-              .eq("id", editItem.id);
-            if (e2) throw e2;
-          } else if (error) {
-            throw error;
-          }
-        }
+        const updatePayload: TablesInsert<"lancamentos"> = {
+          descricao, valor: valorNum,
+          data: effectiveDataEdit,
+          categoria, fixa: fixo,
+          cartao_id: metodo === "cartao" ? cartaoId || null : null,
+          parcelas: metodo === "cartao" ? parseInt(totalParcelas) : null,
+          loja,
+          merchant_logo_url: merchantLogoUrl || null,
+        };
+        const { error } = await supabase.from("lancamentos").update(updatePayload).eq("id", editItem.id);
+        if (error) throw error;
       } else if (fixo && metodo !== "cartao") {
         // Fixed expense: repeat for every remaining month of the year.
-        const grupoId = crypto.randomUUID();
         const baseDate = new Date(data + "T00:00:00");
         const endMonth = 11; // December
         const inserts: TablesInsert<"lancamentos">[] = [];
         for (let m = baseDate.getMonth(); m <= endMonth; m++) {
           const d = new Date(baseDate.getFullYear(), m, baseDate.getDate());
           inserts.push({
-            user_id: user.id, tipo, descricao, valor: valorNum,
+            usuario_id: user.id, descricao, valor: valorNum,
             data: d.toISOString().split("T")[0],
-            data_compra: d.toISOString().split("T")[0],
-            categoria, fixo: true,
-            metodo, cartao_id: null,
-            parcela_grupo_id: grupoId, loja,
-            comprovante_url: receiptPath || null,
+            categoria, fixa: true,
+            cartao_id: null, loja,
             merchant_logo_url: merchantLogoUrl || null,
           });
         }
-        await insertLancamentos(inserts);
+        const { error } = await supabase.from("lancamentos").insert(inserts);
+        if (error) throw error;
       } else if (metodo === "cartao" && parseInt(totalParcelas) > 1) {
-        const grupoId = crypto.randomUUID();
         const parcelas = parseInt(totalParcelas);
         const valorParcela = +(valorNum / parcelas).toFixed(2);
 
         // Determine the correct invoice month for the first installment.
-        // If the purchase day is past the card's closing day, the purchase
-        // falls into the next month's invoice.
-        // Fallback to 31 intentionally: if card not found, no date shift occurs.
         const selectedCartao = cartoes.find((c) => c.id === cartaoId);
-        const diaFechamento = selectedCartao?.dia_fechamento ?? 31;
+        const diaFechamento = selectedCartao?.fechamento ?? 31;
         const startDateStr = getEffectiveInvoiceDate(data, diaFechamento);
         const startDate = new Date(startDateStr + "T00:00:00");
 
-        const inserts = Array.from({ length: parcelas }, (_, i) => {
+        const inserts: TablesInsert<"lancamentos">[] = Array.from({ length: parcelas }, (_, i) => {
           const d = new Date(startDate);
           d.setMonth(d.getMonth() + i);
           return {
-            user_id: user.id, tipo, descricao: `${descricao} (${i + 1}/${parcelas})`,
+            usuario_id: user.id, descricao: `${descricao} (${i + 1}/${parcelas})`,
             valor: valorParcela, data: d.toISOString().split("T")[0],
-            // Original purchase date is the same for all installments
-            data_compra: data,
-            categoria, fixo: false,
-            metodo: "cartao", cartao_id: cartaoId || null,
-            parcela_atual: i + 1, total_parcelas: parcelas,
-            parcela_grupo_id: grupoId, loja,
-            comprovante_url: receiptPath || null,
+            categoria, fixa: false,
+            cartao_id: cartaoId || null,
+            parcela_atual: i + 1, parcelas,
+            loja,
             merchant_logo_url: merchantLogoUrl || null,
           };
         });
 
-        await insertLancamentos(inserts);
+        const { error } = await supabase.from("lancamentos").insert(inserts);
+        if (error) throw error;
       } else {
         // For single-installment card purchases, also apply the closing-date rule.
         let effectiveData = data;
         if (metodo === "cartao" && cartaoId) {
           const selectedCartao = cartoes.find((c) => c.id === cartaoId);
-          const diaFechamento = selectedCartao?.dia_fechamento ?? 31;
+          const diaFechamento = selectedCartao?.fechamento ?? 31;
           effectiveData = getEffectiveInvoiceDate(data, diaFechamento);
         }
-        await insertLancamentos({
-          user_id: user.id, tipo, descricao, valor: valorNum, data: effectiveData,
-          // Preserve the user-chosen purchase date for display
-          data_compra: data,
-          categoria, fixo, metodo, cartao_id: metodo === "cartao" ? cartaoId || null : null, loja,
-          comprovante_url: receiptPath || null,
+        const { error } = await supabase.from("lancamentos").insert({
+          usuario_id: user.id, descricao, valor: valorNum, data: effectiveData,
+          categoria, fixa: fixo, cartao_id: metodo === "cartao" ? cartaoId || null : null, loja,
           merchant_logo_url: merchantLogoUrl || null,
         });
+        if (error) throw error;
       }
 
       queryClient.invalidateQueries({ queryKey: ["lancamentos"] });
@@ -314,24 +231,12 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
   const handleDelete = async () => {
     if (!editItem) return;
     setLoading(true);
-    let error: any;
-    if (editItem.parcela_grupo_id) {
-      // Delete ALL records in the same installment group (past, current and future)
-      ({ error } = await supabase
-        .from("lancamentos")
-        .delete()
-        .eq("parcela_grupo_id", editItem.parcela_grupo_id));
-    } else {
-      ({ error } = await supabase.from("lancamentos").delete().eq("id", editItem.id));
-    }
+    const { error } = await supabase.from("lancamentos").delete().eq("id", editItem.id);
     if (error) {
       toast({ title: "Erro ao excluir", variant: "destructive" });
     } else {
       queryClient.invalidateQueries({ queryKey: ["lancamentos"] });
-      toast({
-        title: editItem.parcela_grupo_id ? "Parcelamento excluído!" : "Excluído!",
-        description: editItem.parcela_grupo_id ? "Todas as parcelas do parcelamento foram removidas." : undefined,
-      });
+      toast({ title: "Excluído!" });
       onOpenChange(false);
     }
     setLoading(false);
@@ -374,7 +279,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
               <Input type="date" value={data} onChange={(e) => setData(e.target.value)} required />
               {metodo === "cartao" && cartaoId && data && (() => {
                 const selectedCartao = cartoes.find((c) => c.id === cartaoId);
-                const diaFechamento = selectedCartao?.dia_fechamento ?? 31;
+                const diaFechamento = selectedCartao?.fechamento ?? 31;
                 const effectiveDate = getEffectiveInvoiceDate(data, diaFechamento);
                 const effectiveDateObj = new Date(effectiveDate + "T00:00:00");
                 if (isNaN(effectiveDateObj.getTime())) return null;
@@ -429,7 +334,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
                     <SelectContent>
                       {cartoes.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
-                          {c.instituicao} •••• {c.final_cartao}
+                          {c.nome}
                         </SelectItem>
                       ))}
                     </SelectContent>

@@ -21,8 +21,9 @@ const Perfil = () => {
   const { data: profile } = useQuery({
     queryKey: ["profile", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("profiles").select("*").eq("user_id", user!.id).single();
-      if (error) throw error;
+      // PGRST116: no rows returned for .single() — expected when no profile exists yet
+      const { data, error } = await supabase.from("usuarios").select("*").eq("id", user!.id).single();
+      if (error && error.code !== "PGRST116") throw error;
       return data;
     },
     enabled: !!user,
@@ -31,7 +32,7 @@ const Perfil = () => {
   const { data: cartoes = [] } = useQuery({
     queryKey: ["cartoes", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("cartoes").select("*").eq("user_id", user!.id).order("created_at");
+      const { data, error } = await supabase.from("cartoes").select("*").eq("usuario_id", user!.id).order("created_at");
       if (error) throw error;
       return data;
     },
@@ -53,7 +54,7 @@ const Perfil = () => {
 
   const updateProfile = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("profiles").update({ nome, email }).eq("user_id", user!.id);
+      const { error } = await supabase.from("usuarios").update({ nome, email }).eq("id", user!.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -124,9 +125,9 @@ const Perfil = () => {
           {cartoes.map((c) => (
             <div key={c.id} className="flex items-center justify-between rounded-lg bg-secondary p-3">
               <div>
-                <p className="text-sm font-medium">{c.instituicao}</p>
+                <p className="text-sm font-medium">{c.nome}</p>
                 <p className="text-xs text-muted-foreground">
-                  •••• {c.final_cartao} · Limite: {formatCurrency(c.limite)} · Fech: {c.dia_fechamento} · Venc: {c.dia_vencimento}
+                  Limite: {formatCurrency(c.limite)} · Fech: {c.fechamento} · Venc: {c.vencimento}
                 </p>
               </div>
               <div className="flex gap-1">
@@ -168,10 +169,8 @@ interface CartaoModalProps {
 const CartaoModal = ({ open, onOpenChange, editItem, userId }: CartaoModalProps) => {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [instituicao, setInstituicao] = useState("");
-  const [debouncedInstituicao, setDebouncedInstituicao] = useState("");
-  const [bandeira, setBandeira] = useState("");
-  const [finalCartao, setFinalCartao] = useState("");
+  const [nome, setNome] = useState("");
+  const [debouncedNome, setDebouncedNome] = useState("");
   const [limite, setLimite] = useState("");
   const [diaFech, setDiaFech] = useState("1");
   const [diaVenc, setDiaVenc] = useState("10");
@@ -179,37 +178,34 @@ const CartaoModal = ({ open, onOpenChange, editItem, userId }: CartaoModalProps)
 
   useEffect(() => {
     if (editItem) {
-      setInstituicao(editItem.instituicao);
-      setBandeira(editItem.bandeira);
-      setFinalCartao(editItem.final_cartao);
+      setNome(editItem.nome);
       setLimite(String(editItem.limite));
-      setDiaFech(String(editItem.dia_fechamento));
-      setDiaVenc(String(editItem.dia_vencimento));
+      setDiaFech(String(editItem.fechamento));
+      setDiaVenc(String(editItem.vencimento));
     } else {
-      setInstituicao(""); setBandeira(""); setFinalCartao("");
-      setLimite(""); setDiaFech("1"); setDiaVenc("10");
+      setNome(""); setLimite(""); setDiaFech("1"); setDiaVenc("10");
     }
   }, [editItem, open]);
 
-  // Debounce instituicao changes so the logo API is not called on every keystroke.
+  // Debounce nome changes so the logo API is not called on every keystroke.
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedInstituicao(instituicao), 500);
+    const timer = setTimeout(() => setDebouncedNome(nome), 500);
     return () => clearTimeout(timer);
-  }, [instituicao]);
+  }, [nome]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       const payload = {
-        instituicao, bandeira, final_cartao: finalCartao,
-        limite: +limite, dia_fechamento: +diaFech, dia_vencimento: +diaVenc,
+        nome,
+        limite: +limite, fechamento: +diaFech, vencimento: +diaVenc,
       };
       if (editItem) {
         const { error } = await supabase.from("cartoes").update(payload).eq("id", editItem.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("cartoes").insert({ ...payload, user_id: userId });
+        const { error } = await supabase.from("cartoes").insert({ ...payload, usuario_id: userId });
         if (error) throw error;
       }
       qc.invalidateQueries({ queryKey: ["cartoes"] });
@@ -232,13 +228,9 @@ const CartaoModal = ({ open, onOpenChange, editItem, userId }: CartaoModalProps)
           <div className="space-y-1">
             <Label>Instituição</Label>
             <div className="flex items-center gap-2">
-              <Input value={instituicao} onChange={(e) => setInstituicao(e.target.value)} required className="flex-1" />
-              {debouncedInstituicao && <BrandLogo store={debouncedInstituicao} size={32} />}
+              <Input value={nome} onChange={(e) => setNome(e.target.value)} required className="flex-1" />
+              {debouncedNome && <BrandLogo store={debouncedNome} size={32} />}
             </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1"><Label>Bandeira</Label><Input value={bandeira} onChange={(e) => setBandeira(e.target.value)} placeholder="Visa, Master..." /></div>
-            <div className="space-y-1"><Label>Final</Label><Input value={finalCartao} onChange={(e) => setFinalCartao(e.target.value)} maxLength={4} placeholder="1234" /></div>
           </div>
           <div className="space-y-1"><Label>Limite (R$)</Label><Input type="number" value={limite} onChange={(e) => setLimite(e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">
