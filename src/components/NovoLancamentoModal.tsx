@@ -150,6 +150,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
         const updatePayload: TablesInsert<"lancamentos"> = {
           descricao, valor: valorNum,
           data: effectiveDataEdit,
+          data_compra: data,
           categoria, fixa: fixo,
           cartao_id: metodo === "cartao" ? cartaoId || null : null,
           parcelas: metodo === "cartao" ? parseInt(totalParcelas) : null,
@@ -168,6 +169,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
           inserts.push({
             usuario_id: user.id, descricao, valor: valorNum,
             data: d.toISOString().split("T")[0],
+            data_compra: data,
             categoria, fixa: true,
             cartao_id: null, loja,
             merchant_logo_url: merchantLogoUrl || null,
@@ -191,6 +193,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
           return {
             usuario_id: user.id, descricao: `${descricao} (${i + 1}/${numParcelas})`,
             valor: valorParcela, data: d.toISOString().split("T")[0],
+            data_compra: data,
             categoria, fixa: false,
             cartao_id: cartaoId || null,
             parcela_atual: i + 1, parcelas: numParcelas,
@@ -211,6 +214,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
         }
         const { error } = await supabase.from("lancamentos").insert({
           usuario_id: user.id, descricao, valor: valorNum, data: effectiveData,
+          data_compra: data,
           categoria, fixa: fixo, cartao_id: metodo === "cartao" ? cartaoId || null : null, loja,
           merchant_logo_url: merchantLogoUrl || null,
         });

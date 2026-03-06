@@ -87,6 +87,7 @@ export type Database = {
           descricao: string
           valor: number
           data: string
+          data_compra: string | null
           categoria: string
           fixa: boolean
           cartao_id: string | null
@@ -103,6 +104,7 @@ export type Database = {
           descricao?: string
           valor?: number
           data?: string
+          data_compra?: string | null
           categoria?: string
           fixa?: boolean
           cartao_id?: string | null
@@ -119,6 +121,7 @@ export type Database = {
           descricao?: string
           valor?: number
           data?: string
+          data_compra?: string | null
           categoria?: string
           fixa?: boolean
           cartao_id?: string | null

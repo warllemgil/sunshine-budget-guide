@@ -302,7 +302,7 @@ const Dashboard = () => {
                 {group.compras.map((l) => {
                   const cat = getCategoriaInfo(l.categoria);
                   const Icon = cat.icon;
-                  const displayDate = l.data;
+                  const displayDate = l.data_compra ?? l.data;
                   const formattedDate = new Date(displayDate + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
                   return (
                     <div key={l.id} className="flex items-center gap-2 rounded-md bg-secondary p-2">
