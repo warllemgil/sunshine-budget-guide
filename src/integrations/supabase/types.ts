@@ -12,84 +12,63 @@ export type Database = {
       cartoes: {
         Row: {
           id: string
-          user_id: string
-          instituicao: string
-          bandeira: string
-          final_cartao: string
+          usuario_id: string
+          nome: string
           limite: number
-          dia_fechamento: number
-          dia_vencimento: number
-          cor: string
+          fechamento: number
+          vencimento: number
           created_at: string
-          updated_at: string
         }
         Insert: {
           id?: string
-          user_id: string
-          instituicao?: string
-          bandeira?: string
-          final_cartao?: string
+          usuario_id: string
+          nome: string
           limite?: number
-          dia_fechamento?: number
-          dia_vencimento?: number
-          cor?: string
+          fechamento?: number
+          vencimento?: number
           created_at?: string
-          updated_at?: string
         }
         Update: {
           id?: string
-          user_id?: string
-          instituicao?: string
-          bandeira?: string
-          final_cartao?: string
+          usuario_id?: string
+          nome?: string
           limite?: number
-          dia_fechamento?: number
-          dia_vencimento?: number
-          cor?: string
+          fechamento?: number
+          vencimento?: number
           created_at?: string
-          updated_at?: string
         }
         Relationships: []
       }
       faturas: {
         Row: {
           id: string
-          user_id: string
+          usuario_id: string
           cartao_id: string
           mes: number
           ano: number
-          valor_pago: number | null
-          pago: boolean
-          comprovante_url: string | null
-          data_pagamento: string | null
+          valor_total: number
+          status: 'pago' | 'pendente'
           created_at: string
-          updated_at: string
         }
         Insert: {
           id?: string
-          user_id: string
+          usuario_id: string
           cartao_id: string
           mes: number
           ano: number
-          valor_pago?: number | null
-          pago?: boolean
-          comprovante_url?: string | null
-          data_pagamento?: string | null
+          valor_total?: number
+          status?: 'pago' | 'pendente'
           created_at?: string
-          updated_at?: string
         }
         Update: {
           id?: string
-          user_id?: string
+          usuario_id?: string
           cartao_id?: string
           mes?: number
           ano?: number
-          valor_pago?: number | null
-          pago?: boolean
-          comprovante_url?: string | null
-          data_pagamento?: string | null
+          valor_total?: number
+          status?: 'pago' | 'pendente'
           created_at?: string
-          updated_at?: string
         }
         Relationships: [
           {
@@ -104,69 +83,51 @@ export type Database = {
       lancamentos: {
         Row: {
           id: string
-          user_id: string
-          tipo: string
+          usuario_id: string
           descricao: string
           valor: number
           data: string
-          data_compra: string | null
           categoria: string
-          fixo: boolean
-          metodo: string
+          fixa: boolean
           cartao_id: string | null
           parcela_atual: number | null
-          total_parcelas: number | null
-          parcela_grupo_id: string | null
-          comprovante_url: string | null
+          parcelas: number | null
           loja: string | null
           merchant_id: string | null
           merchant_logo_url: string | null
           created_at: string
-          updated_at: string
         }
         Insert: {
           id?: string
-          user_id: string
-          tipo?: string
+          usuario_id: string
           descricao?: string
           valor?: number
           data?: string
-          data_compra?: string | null
           categoria?: string
-          fixo?: boolean
-          metodo?: string
+          fixa?: boolean
           cartao_id?: string | null
           parcela_atual?: number | null
-          total_parcelas?: number | null
-          parcela_grupo_id?: string | null
-          comprovante_url?: string | null
+          parcelas?: number | null
           loja?: string | null
           merchant_id?: string | null
           merchant_logo_url?: string | null
           created_at?: string
-          updated_at?: string
         }
         Update: {
           id?: string
-          user_id?: string
-          tipo?: string
+          usuario_id?: string
           descricao?: string
           valor?: number
           data?: string
-          data_compra?: string | null
           categoria?: string
-          fixo?: boolean
-          metodo?: string
+          fixa?: boolean
           cartao_id?: string | null
           parcela_atual?: number | null
-          total_parcelas?: number | null
-          parcela_grupo_id?: string | null
-          comprovante_url?: string | null
+          parcelas?: number | null
           loja?: string | null
           merchant_id?: string | null
           merchant_logo_url?: string | null
           created_at?: string
-          updated_at?: string
         }
         Relationships: [
           {
@@ -194,7 +155,6 @@ export type Database = {
           logo_url: string | null
           logo_storage_path: string | null
           created_at: string
-          updated_at: string
         }
         Insert: {
           id?: string
@@ -204,7 +164,6 @@ export type Database = {
           logo_url?: string | null
           logo_storage_path?: string | null
           created_at?: string
-          updated_at?: string
         }
         Update: {
           id?: string
@@ -214,34 +173,27 @@ export type Database = {
           logo_url?: string | null
           logo_storage_path?: string | null
           created_at?: string
-          updated_at?: string
         }
         Relationships: []
       }
-      profiles: {
+      usuarios: {
         Row: {
           id: string
-          user_id: string
           nome: string
           email: string
           created_at: string
-          updated_at: string
         }
         Insert: {
           id?: string
-          user_id: string
           nome?: string
           email?: string
           created_at?: string
-          updated_at?: string
         }
         Update: {
           id?: string
-          user_id?: string
           nome?: string
           email?: string
           created_at?: string
-          updated_at?: string
         }
         Relationships: []
       }

@@ -56,7 +56,7 @@ const Dashboard = () => {
     queryKey: ["lancamentos", user?.id, mes, ano],
     queryFn: async () => {
       const { data, error } = await supabase.from("lancamentos").select("*")
-        .eq("user_id", user!.id).gte("data", startDate).lt("data", endDate)
+        .eq("usuario_id", user!.id).gte("data", startDate).lt("data", endDate)
         .order("data", { ascending: false });
       if (error) throw error;
       return data;
@@ -67,7 +67,7 @@ const Dashboard = () => {
   const { data: cartoes = [], isSuccess: cartoesLoaded } = useQuery({
     queryKey: ["cartoes", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("cartoes").select("*").eq("user_id", user!.id);
+      const { data, error } = await supabase.from("cartoes").select("*").eq("usuario_id", user!.id);
       if (error) throw error;
       return data;
     },
@@ -77,7 +77,7 @@ const Dashboard = () => {
   const { data: faturas = [] } = useQuery({
     queryKey: ["faturas", user?.id, mes, ano],
     queryFn: async () => {
-      const { data, error } = await supabase.from("faturas").select("*").eq("user_id", user!.id)
+      const { data, error } = await supabase.from("faturas").select("*").eq("usuario_id", user!.id)
         .eq("mes", mes + 1).eq("ano", ano);
       if (error) throw error;
       return data;
@@ -92,11 +92,11 @@ const Dashboard = () => {
     const despesas = lancamentos;
     const totalReceita = 0;
     const totalDespesa = despesas.reduce((s, l) => s + l.valor, 0);
-    const fixasDespesa = despesas.filter((l) => l.fixo && !l.cartao_id);
+    const fixasDespesa = despesas.filter((l) => l.fixa && !l.cartao_id);
     const cartaoIds = new Set(cartoes.map((c) => c.id));
     // Only include card expenses that are linked to an existing card
     const cartaoLanc = despesas.filter((l) => !!l.cartao_id && cartaoIds.has(l.cartao_id));
-    const variaveis = despesas.filter((l) => !l.fixo && !l.cartao_id);
+    const variaveis = despesas.filter((l) => !l.fixa && !l.cartao_id);
     // Orphaned: has cartao_id but no valid card
     const orfaos = cartoesLoaded
       ? despesas.filter((l) => !!l.cartao_id && !cartaoIds.has(l.cartao_id))
@@ -121,7 +121,7 @@ const Dashboard = () => {
     // Init all cards
     cartoes.forEach((c) => {
       const fatura = faturas.find((f) => f.cartao_id === c.id);
-      groups.set(c.id, { cartao: c, total: 0, pago: fatura?.pago === true, fatura: fatura ?? null, compras: [] });
+      groups.set(c.id, { cartao: c, total: 0, pago: fatura?.status === "pago", fatura: fatura ?? null, compras: [] });
     });
 
     stats.cartaoLanc.forEach((l) => {
@@ -156,7 +156,7 @@ const Dashboard = () => {
       if (pago) {
         // Undo payment
         if (fatura) {
-          const { error } = await supabase.from("faturas").update({ pago: false }).eq("id", fatura.id);
+          const { error } = await supabase.from("faturas").update({ status: "pendente" }).eq("id", fatura.id);
           if (error) throw error;
         }
       } else {
@@ -241,12 +241,12 @@ const Dashboard = () => {
             >
               <div className="flex items-center gap-1.5 mb-0.5">
                 <BrandLogo
-                  store={cartao.instituicao}
+                  store={cartao.nome}
                   size={20}
                   fallbackIcon={<CreditCard className="h-3 w-3 text-primary" />}
                   fallbackBg="hsl(var(--primary) / 0.1)"
                 />
-                <p className="text-xs font-medium truncate">{cartao.instituicao}</p>
+                <p className="text-xs font-medium truncate">{cartao.nome}</p>
               </div>
               <p className="text-sm font-semibold">{formatCurrency(total)}</p>
               <div className="flex items-center justify-between mt-1">
@@ -273,20 +273,20 @@ const Dashboard = () => {
             <CardContent className="p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex-1">
-                  <p className="text-xs text-muted-foreground">Fecha dia {group.cartao.dia_fechamento}</p>
+                  <p className="text-xs text-muted-foreground">Fecha dia {group.cartao.fechamento}</p>
                 </div>
                 <div className="flex flex-col items-center">
                   <BrandLogo
-                    store={group.cartao.instituicao}
+                    store={group.cartao.nome}
                     size={40}
                     fallbackIcon={<CreditCard className="h-5 w-5 text-primary" />}
                     fallbackBg="hsl(var(--primary) / 0.1)"
                   />
-                  <p className="text-sm font-semibold text-center leading-tight mt-1">{group.cartao.instituicao}</p>
+                  <p className="text-sm font-semibold text-center leading-tight mt-1">{group.cartao.nome}</p>
                 </div>
                 <div className="flex-1 text-right">
                   <p className="text-lg font-bold">{formatCurrency(group.total)}</p>
-                  <p className="text-xs text-muted-foreground">Vence dia {group.cartao.dia_vencimento}</p>
+                  <p className="text-xs text-muted-foreground">Vence dia {group.cartao.vencimento}</p>
                   <span className={cn("text-[10px]", group.pago ? "text-success" : "text-warning")}>
                     {group.pago ? "✓ Pago" : "Pendente"}
                   </span>
@@ -321,8 +321,8 @@ const Dashboard = () => {
                             <span className="text-muted-foreground font-normal mr-1">{formattedDate}</span>
                             {l.descricao}
                           </p>
-                          {l.parcela_atual && l.total_parcelas ? (
-                            <p className="text-[10px] text-muted-foreground">{l.parcela_atual}/{l.total_parcelas}</p>
+                          {l.parcela_atual && l.parcelas ? (
+                            <p className="text-[10px] text-muted-foreground">{l.parcela_atual}/{l.parcelas}</p>
                           ) : null}
                         </div>
                       </div>
@@ -626,13 +626,13 @@ const PagarFaturaModal = ({ open, onOpenChange, cartaoId, userId, mes, ano, valo
       const valor = parseFloat(valorPago) || valorTotal;
       if (faturaExistente) {
         const { error } = await supabase.from("faturas")
-          .update({ pago: true, valor_pago: valor })
+          .update({ status: "pago", valor_total: valor })
           .eq("id", faturaExistente.id);
         if (error) throw error;
       } else {
         const { error } = await supabase.from("faturas").insert({
-          user_id: userId, cartao_id: cartaoId, mes, ano,
-          pago: true, valor_pago: valor,
+          usuario_id: userId, cartao_id: cartaoId, mes, ano,
+          status: "pago", valor_total: valor,
         });
         if (error) throw error;
       }

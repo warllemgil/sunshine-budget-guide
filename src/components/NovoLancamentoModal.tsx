@@ -53,7 +53,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
 
   useEffect(() => {
     if (!user || !open) return;
-    supabase.from("cartoes").select("*").eq("user_id", user.id).then(({ data }) => {
+    supabase.from("cartoes").select("*").eq("usuario_id", user.id).then(({ data }) => {
       if (data) setCartoes(data);
     });
   }, [user, open]);
@@ -87,17 +87,17 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
     if (editItem) {
       setTipo("despesa");
       // Strip the "(N/M)" installment suffix so the user edits the base description
-      const baseDescricao = editItem.parcela_atual && editItem.total_parcelas
+      const baseDescricao = editItem.parcela_atual && editItem.parcelas
         ? editItem.descricao.replace(/ \(\d+\/\d+\)$/, "")
         : editItem.descricao;
       setDescricao(baseDescricao);
       setValor(String(editItem.valor));
       setData(editItem.data);
       setCategoria(editItem.categoria);
-      setFixo(editItem.fixo);
+      setFixo(editItem.fixa);
       setMetodo(editItem.cartao_id ? "cartao" : "avista");
       setCartaoId(editItem.cartao_id || "");
-      setTotalParcelas(String(editItem.total_parcelas || 1));
+      setTotalParcelas(String(editItem.parcelas || 1));
       setLoja(editItem.loja || "");
       setMerchantLogoUrl(editItem.merchant_logo_url || null);
       setReceiptPath('');
@@ -143,16 +143,16 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
         let effectiveDataEdit = data;
         if (metodo === "cartao" && cartaoId) {
           const selectedCartao = cartoes.find((c) => c.id === cartaoId);
-          const diaFechamento = selectedCartao?.dia_fechamento ?? 31;
+          const diaFechamento = selectedCartao?.fechamento ?? 31;
           effectiveDataEdit = getEffectiveInvoiceDate(data, diaFechamento);
         }
 
         const updatePayload: TablesInsert<"lancamentos"> = {
           descricao, valor: valorNum,
           data: effectiveDataEdit,
-          categoria, fixo: fixo,
+          categoria, fixa: fixo,
           cartao_id: metodo === "cartao" ? cartaoId || null : null,
-          total_parcelas: metodo === "cartao" ? parseInt(totalParcelas) : null,
+          parcelas: metodo === "cartao" ? parseInt(totalParcelas) : null,
           loja,
           merchant_logo_url: merchantLogoUrl || null,
         };
@@ -166,9 +166,9 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
         for (let m = baseDate.getMonth(); m <= endMonth; m++) {
           const d = new Date(baseDate.getFullYear(), m, baseDate.getDate());
           inserts.push({
-            user_id: user.id, descricao, valor: valorNum,
+            usuario_id: user.id, descricao, valor: valorNum,
             data: d.toISOString().split("T")[0],
-            categoria, fixo: true,
+            categoria, fixa: true,
             cartao_id: null, loja,
             merchant_logo_url: merchantLogoUrl || null,
           });
@@ -176,24 +176,24 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
         const { error } = await supabase.from("lancamentos").insert(inserts);
         if (error) throw error;
       } else if (metodo === "cartao" && parseInt(totalParcelas) > 1) {
-        const parcelas = parseInt(totalParcelas);
-        const valorParcela = +(valorNum / parcelas).toFixed(2);
+        const numParcelas = parseInt(totalParcelas);
+        const valorParcela = +(valorNum / numParcelas).toFixed(2);
 
         // Determine the correct invoice month for the first installment.
         const selectedCartao = cartoes.find((c) => c.id === cartaoId);
-        const diaFechamento = selectedCartao?.dia_fechamento ?? 31;
+        const diaFechamento = selectedCartao?.fechamento ?? 31;
         const startDateStr = getEffectiveInvoiceDate(data, diaFechamento);
         const startDate = new Date(startDateStr + "T00:00:00");
 
-        const inserts: TablesInsert<"lancamentos">[] = Array.from({ length: parcelas }, (_, i) => {
+        const inserts: TablesInsert<"lancamentos">[] = Array.from({ length: numParcelas }, (_, i) => {
           const d = new Date(startDate);
           d.setMonth(d.getMonth() + i);
           return {
-            user_id: user.id, descricao: `${descricao} (${i + 1}/${parcelas})`,
+            usuario_id: user.id, descricao: `${descricao} (${i + 1}/${numParcelas})`,
             valor: valorParcela, data: d.toISOString().split("T")[0],
-            categoria, fixo: false,
+            categoria, fixa: false,
             cartao_id: cartaoId || null,
-            parcela_atual: i + 1, total_parcelas: parcelas,
+            parcela_atual: i + 1, parcelas: numParcelas,
             loja,
             merchant_logo_url: merchantLogoUrl || null,
           };
@@ -206,12 +206,12 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
         let effectiveData = data;
         if (metodo === "cartao" && cartaoId) {
           const selectedCartao = cartoes.find((c) => c.id === cartaoId);
-          const diaFechamento = selectedCartao?.dia_fechamento ?? 31;
+          const diaFechamento = selectedCartao?.fechamento ?? 31;
           effectiveData = getEffectiveInvoiceDate(data, diaFechamento);
         }
         const { error } = await supabase.from("lancamentos").insert({
-          user_id: user.id, descricao, valor: valorNum, data: effectiveData,
-          categoria, fixo: fixo, cartao_id: metodo === "cartao" ? cartaoId || null : null, loja,
+          usuario_id: user.id, descricao, valor: valorNum, data: effectiveData,
+          categoria, fixa: fixo, cartao_id: metodo === "cartao" ? cartaoId || null : null, loja,
           merchant_logo_url: merchantLogoUrl || null,
         });
         if (error) throw error;
@@ -279,7 +279,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
               <Input type="date" value={data} onChange={(e) => setData(e.target.value)} required />
               {metodo === "cartao" && cartaoId && data && (() => {
                 const selectedCartao = cartoes.find((c) => c.id === cartaoId);
-                const diaFechamento = selectedCartao?.dia_fechamento ?? 31;
+                const diaFechamento = selectedCartao?.fechamento ?? 31;
                 const effectiveDate = getEffectiveInvoiceDate(data, diaFechamento);
                 const effectiveDateObj = new Date(effectiveDate + "T00:00:00");
                 if (isNaN(effectiveDateObj.getTime())) return null;
@@ -334,7 +334,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
                     <SelectContent>
                       {cartoes.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
-                          {c.instituicao}
+                        {c.nome}
                         </SelectItem>
                       ))}
                     </SelectContent>

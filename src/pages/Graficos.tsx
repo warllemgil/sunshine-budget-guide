@@ -21,7 +21,7 @@ const Graficos = () => {
     queryKey: ["lancamentos", user?.id, mes, ano],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("lancamentos").select("*").eq("user_id", user!.id)
+        .from("lancamentos").select("*").eq("usuario_id", user!.id)
         .gte("data", startDate).lt("data", endDate);
       if (error) throw error;
       return data;
