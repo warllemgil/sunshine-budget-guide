@@ -49,6 +49,32 @@ const Auth = () => {
     }
   };
 
+  const handleGoogleAuth = async () => {
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: window.location.origin,
+          scopes: "openid email profile https://www.googleapis.com/auth/drive.file",
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
+          },
+        },
+      });
+      if (error) throw error;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro inesperado";
+      toast({
+        title: "Erro ao entrar com Google",
+        description: message,
+        variant: "destructive",
+      });
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
@@ -88,6 +114,9 @@ const Auth = () => {
             />
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Aguarde..." : isLogin ? "Entrar" : "Cadastrar"}
+            </Button>
+            <Button type="button" variant="outline" className="w-full" disabled={loading} onClick={handleGoogleAuth}>
+              {loading ? "Aguarde..." : "Continuar com Google"}
             </Button>
           </form>
           <div className="mt-4 text-center">

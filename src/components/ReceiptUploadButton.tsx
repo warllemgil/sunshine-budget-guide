@@ -15,6 +15,7 @@ export const ReceiptUploadButton = ({ onUploadSuccess }: ReceiptUploadButtonProp
   const { toast } = useToast();
   const [selected, setSelected] = useState<File | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isGoogleSession = user?.app_metadata?.provider === 'google';
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -43,6 +44,17 @@ export const ReceiptUploadButton = ({ onUploadSuccess }: ReceiptUploadButtonProp
 
   return (
     <div className="flex flex-col gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+      <p className="text-xs text-muted-foreground">Destino: Google Drive (sem uso de armazenamento do Supabase).</p>
+      {!isGoogleSession && (
+        <p className="text-[11px] text-destructive">
+          Entre com conta Google para enviar comprovantes.
+        </p>
+      )}
+      {isGoogleSession && (
+        <p className="text-[11px] text-muted-foreground">
+          Imagens serao compactadas automaticamente antes do upload para economizar espaco.
+        </p>
+      )}
       <input
         ref={inputRef}
         type="file"

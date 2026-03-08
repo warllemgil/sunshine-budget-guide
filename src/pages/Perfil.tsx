@@ -12,6 +12,7 @@ import { formatCurrency } from "@/lib/formatters";
 import { User, CreditCard, Plus, Trash2, Edit2, LogOut, Check, X } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import BrandLogo from "@/components/BrandLogo";
+import { useReceipts } from "@/hooks/useReceipts";
 
 const BANK_SUGGESTIONS = [
   "Nubank",
@@ -30,6 +31,8 @@ const Perfil = () => {
   const { user, signOut } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
+  const { storageProvider } = useReceipts();
+  const isGoogleSession = user?.app_metadata?.provider === "google";
 
   const { data: profile } = useQuery({
     queryKey: ["profile", user?.id],
@@ -87,6 +90,24 @@ const Perfil = () => {
       toast({ title: "Cartão removido!" });
     },
   });
+
+  const connectGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+        scopes: "openid email profile https://www.googleapis.com/auth/drive.file",
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent",
+        },
+      },
+    });
+
+    if (error) {
+      toast({ title: "Erro ao conectar Google", description: error.message, variant: "destructive" });
+    }
+  };
 
   return (
     <div className="mx-auto max-w-lg space-y-5 p-4">
@@ -172,6 +193,33 @@ const Perfil = () => {
               </div>
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Armazenamento de Arquivos</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Novos comprovantes sao enviados para o Google Drive para economizar espaco no Supabase.
+          </p>
+          <div className="rounded-md border border-border bg-secondary px-3 py-2 text-sm font-medium">
+            Destino atual: Google Drive
+          </div>
+          {!isGoogleSession && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Entre com sua conta Google para habilitar upload de comprovantes.
+              </p>
+              <Button type="button" variant="outline" className="w-full" onClick={connectGoogle}>
+                Conectar Google
+              </Button>
+            </div>
+          )}
+          {isGoogleSession && storageProvider === "google-drive" && (
+            <p className="text-xs text-success">Novo comprovante sera salvo no seu Google Drive.</p>
+          )}
         </CardContent>
       </Card>
 
