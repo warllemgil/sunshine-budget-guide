@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -12,6 +12,19 @@ import { formatCurrency } from "@/lib/formatters";
 import { User, CreditCard, Plus, Trash2, Edit2, LogOut, Check, X } from "lucide-react";
 import type { Tables, TablesInsert } from "@/integrations/supabase/types";
 import BrandLogo from "@/components/BrandLogo";
+
+const BANK_SUGGESTIONS = [
+  "Nubank",
+  "Caixa",
+  "Santander",
+  "Bradesco",
+  "Itau",
+  "Banco do Brasil",
+  "Inter",
+  "PicPay",
+  "Mercado Pago",
+  "PagBank",
+];
 
 const Perfil = () => {
   const { user, signOut } = useAuth();
@@ -171,6 +184,7 @@ const CartaoModal = ({ open, onOpenChange, editItem, userId }: CartaoModalProps)
   const qc = useQueryClient();
   const [nome, setNome] = useState("");
   const [debouncedNome, setDebouncedNome] = useState("");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [limite, setLimite] = useState("");
   const [fechamento, setFechamento] = useState("1");
   const [vencimento, setVencimento] = useState("10");
@@ -179,10 +193,12 @@ const CartaoModal = ({ open, onOpenChange, editItem, userId }: CartaoModalProps)
   useEffect(() => {
     if (editItem) {
       setNome(editItem.nome);
+      setLogoUrl(editItem.logo_url ?? null);
       setLimite(String(editItem.limite));
       setFechamento(String(editItem.fechamento));
       setVencimento(String(editItem.vencimento));
     } else {
+      setLogoUrl(null);
       setNome(""); setLimite(""); setFechamento("1"); setVencimento("10");
     }
   }, [editItem, open]);
@@ -193,12 +209,21 @@ const CartaoModal = ({ open, onOpenChange, editItem, userId }: CartaoModalProps)
     return () => clearTimeout(timer);
   }, [nome]);
 
+  const cardSuggestions = useMemo(() => {
+    const term = nome.trim().toLowerCase();
+    if (term.length < 2) return [];
+    return BANK_SUGGESTIONS
+      .filter((bank) => bank.toLowerCase().includes(term))
+      .slice(0, 5);
+  }, [nome]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       const payload = {
         nome,
+        logo_url: logoUrl,
         limite: +limite, fechamento: +fechamento, vencimento: +vencimento,
       };
       if (editItem) {
@@ -230,8 +255,33 @@ const CartaoModal = ({ open, onOpenChange, editItem, userId }: CartaoModalProps)
             <Label>Nome do Cartão</Label>
             <div className="flex items-center gap-2">
               <Input value={nome} onChange={(e) => setNome(e.target.value)} required className="flex-1" />
-              {debouncedNome && <BrandLogo store={debouncedNome} size={32} />}
+              {debouncedNome && (
+                <BrandLogo
+                  store={debouncedNome}
+                  size={32}
+                  initialUrl={logoUrl}
+                  onLogoResolved={setLogoUrl}
+                />
+              )}
             </div>
+            {cardSuggestions.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[11px] text-muted-foreground">Sugestoes de bancos (max. 5):</p>
+                <div className="grid grid-cols-1 gap-1">
+                  {cardSuggestions.map((bank) => (
+                    <button
+                      key={bank}
+                      type="button"
+                      className="flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5 text-left hover:bg-secondary"
+                      onClick={() => setNome(bank)}
+                    >
+                      <BrandLogo store={bank} size={18} />
+                      <span className="text-xs">{bank}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div className="space-y-1"><Label>Limite (R$)</Label><Input type="number" value={limite} onChange={(e) => setLimite(e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">

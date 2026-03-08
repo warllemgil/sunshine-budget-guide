@@ -23,7 +23,27 @@ type SupabaseLikeError = {
   message?: string;
   details?: string;
   hint?: string;
+  code?: string;
 };
+
+const RECEIPT_COLUMNS = ["comprovante_url", "comprovante", "anexo_url", "anexo", "receipt_url"] as const;
+
+const LOGO_SUGGESTIONS: Array<{ name: string; domain: string }> = [
+  { name: "Nubank", domain: "nubank.com.br" },
+  { name: "Caixa", domain: "caixa.gov.br" },
+  { name: "Santander", domain: "santander.com.br" },
+  { name: "Bradesco", domain: "bradesco.com.br" },
+  { name: "Itau", domain: "itau.com.br" },
+  { name: "Banco do Brasil", domain: "bb.com.br" },
+  { name: "PicPay", domain: "picpay.com" },
+  { name: "Mercado Pago", domain: "mercadopago.com.br" },
+  { name: "iFood", domain: "ifood.com.br" },
+  { name: "Rappi", domain: "rappi.com.br" },
+  { name: "99 Food", domain: "99app.com" },
+  { name: "Uber Eats", domain: "ubereats.com" },
+  { name: "Aiqfome", domain: "aiqfome.com" },
+  { name: "Ze Delivery", domain: "zedelivery.com.br" },
+];
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -61,6 +81,64 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
   const [receiptPath, setReceiptPath] = useState<string>('');
   const [receiptFileName, setReceiptFileName] = useState<string>('');
   const manualLogoInputRef = useRef<HTMLInputElement | null>(null);
+
+  const isUnknownColumnError = (error: unknown, column: string): boolean => {
+    const e = error as SupabaseLikeError;
+    const msg = `${e.message ?? ""} ${e.details ?? ""}`.toLowerCase();
+    return e.code === "42703" && msg.includes(column.toLowerCase());
+  };
+
+  const updateLancamentoWithReceiptFallback = async (id: string, basePayload: TablesInsert<"lancamentos">) => {
+    if (!receiptPath) {
+      const { error } = await supabase.from("lancamentos").update(basePayload).eq("id", id);
+      if (error) throw error;
+      return;
+    }
+
+    for (const col of RECEIPT_COLUMNS) {
+      const { error } = await supabase.from("lancamentos").update({
+        ...basePayload,
+        [col]: receiptPath,
+      } as never).eq("id", id);
+      if (!error) return;
+      if (isUnknownColumnError(error, col)) continue;
+      throw error;
+    }
+
+    const { error } = await supabase.from("lancamentos").update(basePayload).eq("id", id);
+    if (error) throw error;
+  };
+
+  const insertLancamentosWithReceiptFallback = async (
+    payload: TablesInsert<"lancamentos"> | TablesInsert<"lancamentos">[],
+  ) => {
+    if (!receiptPath) {
+      const { error } = await supabase.from("lancamentos").insert(payload);
+      if (error) throw error;
+      return;
+    }
+
+    for (const col of RECEIPT_COLUMNS) {
+      const withReceipt = Array.isArray(payload)
+        ? payload.map((item) => ({ ...item, [col]: receiptPath }))
+        : { ...payload, [col]: receiptPath };
+      const { error } = await supabase.from("lancamentos").insert(withReceipt as never);
+      if (!error) return;
+      if (isUnknownColumnError(error, col)) continue;
+      throw error;
+    }
+
+    const { error } = await supabase.from("lancamentos").insert(payload);
+    if (error) throw error;
+  };
+
+  const logoSuggestions = useMemo(() => {
+    const term = loja.trim().toLowerCase();
+    if (term.length < 2) return [];
+    return LOGO_SUGGESTIONS
+      .filter((item) => item.name.toLowerCase().includes(term))
+      .slice(0, 5);
+  }, [loja]);
 
   const descricaoHint = useMemo(() => {
     const value = descricao.trim().toLowerCase();
@@ -254,8 +332,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
           merchant_id: merchantId || null,
           merchant_logo_url: merchantLogoUrl || null,
         };
-        const { error } = await supabase.from("lancamentos").update(updatePayload).eq("id", editItem.id);
-        if (error) throw error;
+        await updateLancamentoWithReceiptFallback(editItem.id, updatePayload);
       } else if (!isReceita && fixaEfetiva && metodoEfetivo !== "cartao") {
         // Fixed expense: repeat for every remaining month of the year.
         const baseDate = new Date(data + "T00:00:00");
@@ -274,8 +351,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
             merchant_logo_url: merchantLogoUrl || null,
           });
         }
-        const { error } = await supabase.from("lancamentos").insert(inserts);
-        if (error) throw error;
+        await insertLancamentosWithReceiptFallback(inserts);
       } else if (!isReceita && metodoEfetivo === "cartao" && parseInt(totalParcelas) > 1) {
         const numParcelas = parseInt(totalParcelas);
         const valorParcela = +(valorNum / numParcelas).toFixed(2);
@@ -303,8 +379,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
           };
         });
 
-        const { error } = await supabase.from("lancamentos").insert(inserts);
-        if (error) throw error;
+        await insertLancamentosWithReceiptFallback(inserts);
       } else {
         // For single-installment card purchases, also apply the closing-date rule.
         let effectiveData = data;
@@ -313,7 +388,7 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
           const diaFechamento = selectedCartao?.fechamento ?? 31;
           effectiveData = getEffectiveInvoiceDate(data, diaFechamento);
         }
-        const { error } = await supabase.from("lancamentos").insert({
+        await insertLancamentosWithReceiptFallback({
           usuario_id: user.id, descricao, valor: valorEfetivo, data: effectiveData,
           data_compra: data,
           tipo: tipoEfetivo,
@@ -321,7 +396,6 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
           merchant_id: merchantId || null,
           merchant_logo_url: merchantLogoUrl || null,
         });
-        if (error) throw error;
       }
 
       queryClient.invalidateQueries({ queryKey: ["lancamentos"] });
@@ -499,6 +573,27 @@ const NovoLancamentoModal = ({ open, onOpenChange, editItem, sharedFile, onShare
                 />
               )}
             </div>
+            {logoSuggestions.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[11px] text-muted-foreground">Sugestoes de logo (max. 5):</p>
+                <div className="grid grid-cols-1 gap-1">
+                  {logoSuggestions.map((item) => (
+                    <button
+                      key={item.name}
+                      type="button"
+                      className="flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5 text-left hover:bg-secondary"
+                      onClick={() => {
+                        setLoja(item.name);
+                        setMerchantLogoUrl(`https://logo.clearbit.com/${item.domain}`);
+                      }}
+                    >
+                      <BrandLogo store={item.name} initialUrl={`https://logo.clearbit.com/${item.domain}`} size={18} />
+                      <span className="text-xs">{item.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <input
               ref={manualLogoInputRef}
               type="file"

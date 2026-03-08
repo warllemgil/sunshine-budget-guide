@@ -26,6 +26,44 @@ import BrandLogo from "@/components/BrandLogo";
 
 const getInstallmentBaseDescription = (descricao: string): string => descricao.replace(/ \(\d+\/\d+\)$/, "");
 
+const RECEIPT_COLUMNS = ["comprovante_url", "comprovante", "anexo_url", "anexo", "receipt_url"] as const;
+
+const getDbComprovanteUrl = (row: unknown): string | null => {
+  if (!row || typeof row !== "object") return null;
+  const record = row as Record<string, unknown>;
+  for (const col of RECEIPT_COLUMNS) {
+    const value = record[col];
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+  return null;
+};
+
+const LANCAMENTO_RECEIPT_KEY = "receipt:lancamento:";
+const FATURA_RECEIPT_KEY = "receipt:fatura:";
+
+const getLocalReceipt = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const setLocalReceipt = (key: string, value: string | null) => {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    // ignore localStorage failures
+  }
+};
+
+const isUnknownColumnError = (error: unknown, column: string): boolean => {
+  const e = error as { code?: string; message?: string; details?: string };
+  const msg = `${e.message ?? ""} ${e.details ?? ""}`.toLowerCase();
+  return e.code === "42703" && msg.includes(column.toLowerCase());
+};
+
 const Dashboard = () => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -40,6 +78,7 @@ const Dashboard = () => {
   const [pagarCartaoId, setPagarCartaoId] = useState<string | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [receiptLancamento, setReceiptLancamento] = useState<Tables<"lancamentos"> | null>(null);
+  const [receiptRefreshTick, setReceiptRefreshTick] = useState(0);
 
   const { sharedFile, clearSharedFile } = useShareTarget();
 
@@ -335,6 +374,7 @@ const Dashboard = () => {
                 {group.compras.map((l) => {
                   const cat = getCategoriaInfo(l.categoria);
                   const Icon = cat.icon;
+                  const hasReceipt = !!getDbComprovanteUrl(l) || !!getLocalReceipt(`${LANCAMENTO_RECEIPT_KEY}${l.id}`);
                   const displayDate = l.data_compra ?? l.data;
                   const formattedDate = new Date(displayDate + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
                   return (
@@ -364,8 +404,8 @@ const Dashboard = () => {
                         <p className="text-xs font-semibold">{formatCurrency(l.valor)}</p>
                         <button
                           onClick={() => { setReceiptLancamento(l); setShowReceiptModal(true); }}
-                          className="p-1 text-muted-foreground hover:text-foreground"
-                          title="Anexar comprovante"
+                          className={cn("p-1 hover:text-foreground", hasReceipt ? "text-primary" : "text-muted-foreground")}
+                          title={hasReceipt ? "Visualizar comprovante" : "Anexar comprovante"}
                         >
                           <Paperclip className="h-3 w-3" />
                         </button>
@@ -416,6 +456,23 @@ const Dashboard = () => {
                   </Button>
                 )}
               </div>
+
+              {/* Comprovante do pagamento da fatura (DB when available, local fallback otherwise) */}
+              {(() => {
+                const dbPath = getDbComprovanteUrl(group.fatura);
+                const localKey = group.fatura
+                  ? `${FATURA_RECEIPT_KEY}${group.fatura.id}`
+                  : `${FATURA_RECEIPT_KEY}${group.cartao.id}:${mes + 1}:${ano}`;
+                const path = dbPath ?? getLocalReceipt(localKey);
+                if (!path) return null;
+
+                return (
+                  <div className="pt-1">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">📸 Comprovante do Pagamento</p>
+                    <ReceiptViewer filePath={path} fileName="Comprovante" />
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         );
@@ -469,6 +526,8 @@ const Dashboard = () => {
         onOpenChange={(v) => { setShowReceiptModal(v); if (!v) setReceiptLancamento(null); }}
         lancamento={receiptLancamento}
         onSaved={() => qc.invalidateQueries({ queryKey: ["lancamentos"] })}
+        receiptRefreshTick={receiptRefreshTick}
+        onReceiptSaved={() => setReceiptRefreshTick((v) => v + 1)}
       />
 
       {/* Modal Pagar Fatura */}
@@ -481,6 +540,8 @@ const Dashboard = () => {
         ano={ano}
         valorTotal={cartaoGroups.find((g) => g.cartao.id === pagarCartaoId)?.total ?? 0}
         faturaExistente={faturas.find((f) => f.cartao_id === pagarCartaoId) ?? null}
+        receiptRefreshTick={receiptRefreshTick}
+        onReceiptSaved={() => setReceiptRefreshTick((v) => v + 1)}
       />
 
       {/* Confirmation dialog for installment group deletion */}
@@ -503,6 +564,7 @@ const Section = ({ title, icon, children }: { title: string; icon: React.ReactNo
 const LancamentoRow = ({ item, onClick, onReceiptClick }: { item: Tables<"lancamentos">; onClick: () => void; onReceiptClick?: () => void }) => {
   const cat = getCategoriaInfo(item.categoria);
   const Icon = cat.icon;
+  const hasReceipt = !!getDbComprovanteUrl(item) || !!getLocalReceipt(`${LANCAMENTO_RECEIPT_KEY}${item.id}`);
   return (
     <div className="flex w-full items-center gap-2 rounded-lg bg-card border border-border shadow-sm hover:shadow-md transition-shadow">
       <button onClick={onClick} className="flex flex-1 items-center gap-3 p-3 text-left min-w-0">
@@ -524,8 +586,8 @@ const LancamentoRow = ({ item, onClick, onReceiptClick }: { item: Tables<"lancam
       {onReceiptClick && (
         <button
           onClick={onReceiptClick}
-          className="p-2 flex-shrink-0 text-muted-foreground hover:text-foreground"
-          title="Anexar comprovante"
+          className={cn("p-2 flex-shrink-0 hover:text-foreground", hasReceipt ? "text-primary" : "text-muted-foreground")}
+          title={hasReceipt ? "Visualizar comprovante" : "Anexar comprovante"}
         >
           <Paperclip className="h-4 w-4" />
         </button>
@@ -537,6 +599,7 @@ const LancamentoRow = ({ item, onClick, onReceiptClick }: { item: Tables<"lancam
 const MiniLancamentoRow = ({ item, onClick, onReceiptClick }: { item: Tables<"lancamentos">; onClick: () => void; onReceiptClick?: () => void }) => {
   const cat = getCategoriaInfo(item.categoria);
   const Icon = cat.icon;
+  const hasReceipt = !!getDbComprovanteUrl(item) || !!getLocalReceipt(`${LANCAMENTO_RECEIPT_KEY}${item.id}`);
   return (
     <div className="flex w-full items-center gap-2 rounded-lg bg-card p-2 border border-border hover:shadow-sm transition-shadow">
       <button onClick={onClick} className="flex flex-1 items-center gap-2 text-left min-w-0">
@@ -551,8 +614,8 @@ const MiniLancamentoRow = ({ item, onClick, onReceiptClick }: { item: Tables<"la
       {onReceiptClick && (
         <button
           onClick={onReceiptClick}
-          className="p-1 flex-shrink-0 text-muted-foreground hover:text-foreground"
-          title="Anexar comprovante"
+          className={cn("p-1 flex-shrink-0 hover:text-foreground", hasReceipt ? "text-primary" : "text-muted-foreground")}
+          title={hasReceipt ? "Visualizar comprovante" : "Anexar comprovante"}
         >
           <Paperclip className="h-3 w-3" />
         </button>
@@ -568,9 +631,18 @@ interface ReceiptDespesaFixaModalProps {
   onOpenChange: (open: boolean) => void;
   lancamento: Tables<"lancamentos"> | null;
   onSaved: () => void;
+  receiptRefreshTick: number;
+  onReceiptSaved: () => void;
 }
 
-const ReceiptDespesaFixaModal = ({ open, onOpenChange, lancamento, onSaved }: ReceiptDespesaFixaModalProps) => {
+const ReceiptDespesaFixaModal = ({
+  open,
+  onOpenChange,
+  lancamento,
+  onSaved,
+  receiptRefreshTick,
+  onReceiptSaved,
+}: ReceiptDespesaFixaModalProps) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [receiptPath, setReceiptPath] = useState<string>('');
@@ -578,19 +650,52 @@ const ReceiptDespesaFixaModal = ({ open, onOpenChange, lancamento, onSaved }: Re
 
   useEffect(() => {
     if (lancamento) {
-      setReceiptPath('');
-      setReceiptFileName('');
+      const dbPath = getDbComprovanteUrl(lancamento);
+      const localPath = getLocalReceipt(`${LANCAMENTO_RECEIPT_KEY}${lancamento.id}`);
+      const path = dbPath ?? localPath ?? '';
+      setReceiptPath(path);
+      setReceiptFileName(path ? 'Comprovante' : '');
     } else {
       setReceiptPath('');
       setReceiptFileName('');
     }
-  }, [lancamento, open]);
+  }, [lancamento, open, receiptRefreshTick]);
 
   const handleSave = async () => {
     if (!lancamento) return;
     setLoading(true);
     try {
-      toast({ title: "Comprovante enviado (schema atual sem persistencia em coluna)." });
+      const localKey = `${LANCAMENTO_RECEIPT_KEY}${lancamento.id}`;
+      const nextVal = receiptPath || null;
+      setLocalReceipt(localKey, nextVal);
+
+      // Try DB persistence across likely attachment column names.
+      let dbSaved = false;
+      let lastError: unknown = null;
+      for (const col of RECEIPT_COLUMNS) {
+        const { error } = await supabase.from("lancamentos")
+          .update({ [col]: nextVal } as never)
+          .eq("id", lancamento.id);
+        if (!error) {
+          dbSaved = true;
+          break;
+        }
+        if (isUnknownColumnError(error, col)) {
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+
+      if (!dbSaved) {
+        if (lastError) {
+          toast({ title: "Comprovante salvo localmente neste dispositivo." });
+        }
+      } else {
+        toast({ title: "Comprovante salvo!" });
+      }
+
+      onReceiptSaved();
       onSaved();
       onOpenChange(false);
     } catch (err: unknown) {
@@ -646,9 +751,22 @@ interface PagarFaturaModalProps {
   ano: number;
   valorTotal: number;
   faturaExistente: Tables<"faturas"> | null;
+  receiptRefreshTick: number;
+  onReceiptSaved: () => void;
 }
 
-const PagarFaturaModal = ({ open, onOpenChange, cartaoId, userId, mes, ano, valorTotal, faturaExistente }: PagarFaturaModalProps) => {
+const PagarFaturaModal = ({
+  open,
+  onOpenChange,
+  cartaoId,
+  userId,
+  mes,
+  ano,
+  valorTotal,
+  faturaExistente,
+  receiptRefreshTick,
+  onReceiptSaved,
+}: PagarFaturaModalProps) => {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [valorPago, setValorPago] = useState("");
@@ -659,10 +777,16 @@ const PagarFaturaModal = ({ open, onOpenChange, cartaoId, userId, mes, ano, valo
   // Reset/pre-fill receipt state whenever the modal opens or the existing invoice changes
   useEffect(() => {
     if (open) {
-      setReceiptPath('');
-      setReceiptFileName('');
+      const key = faturaExistente
+        ? `${FATURA_RECEIPT_KEY}${faturaExistente.id}`
+        : `${FATURA_RECEIPT_KEY}${cartaoId ?? "none"}:${mes}:${ano}`;
+      const dbPath = getDbComprovanteUrl(faturaExistente);
+      const localPath = getLocalReceipt(key);
+      const path = dbPath ?? localPath ?? '';
+      setReceiptPath(path);
+      setReceiptFileName(path ? 'Comprovante' : '');
     }
-  }, [open, faturaExistente]);
+  }, [open, faturaExistente, cartaoId, mes, ano, receiptRefreshTick]);
 
   // Reset the payment amount field each time the modal opens fresh
   useEffect(() => {
@@ -675,19 +799,60 @@ const PagarFaturaModal = ({ open, onOpenChange, cartaoId, userId, mes, ano, valo
     setLoading(true);
     try {
       const valor = parseFloat(valorPago) || valorTotal;
+      const nextReceipt = receiptPath || null;
+      const localKey = faturaExistente
+        ? `${FATURA_RECEIPT_KEY}${faturaExistente.id}`
+        : `${FATURA_RECEIPT_KEY}${cartaoId}:${mes}:${ano}`;
+      setLocalReceipt(localKey, nextReceipt);
+
       if (faturaExistente) {
-        const { error } = await supabase.from("faturas")
+        // Base status update always required.
+        const { error: baseError } = await supabase.from("faturas")
           .update({ status: "pago", valor_total: valor })
           .eq("id", faturaExistente.id);
-        if (error) throw error;
+        if (baseError) throw baseError;
+
+        // Optional receipt persistence by probing likely column names.
+        for (const col of RECEIPT_COLUMNS) {
+          const { error } = await supabase.from("faturas")
+            .update({ [col]: nextReceipt } as never)
+            .eq("id", faturaExistente.id);
+          if (!error) break;
+          if (isUnknownColumnError(error, col)) continue;
+          throw error;
+        }
       } else {
-        const { error } = await supabase.from("faturas").insert({
-          usuario_id: userId, cartao_id: cartaoId, mes, ano,
-          status: "pago", valor_total: valor,
-        });
-        if (error) throw error;
+        const basePayload = {
+          usuario_id: userId,
+          cartao_id: cartaoId,
+          mes,
+          ano,
+          status: "pago",
+          valor_total: valor,
+        };
+
+        // First try insert with a receipt column; fallback to base payload.
+        let inserted = false;
+        for (const col of RECEIPT_COLUMNS) {
+          const { error } = await supabase.from("faturas").insert({
+            ...basePayload,
+            [col]: nextReceipt,
+          } as never);
+          if (!error) {
+            inserted = true;
+            break;
+          }
+          if (isUnknownColumnError(error, col)) continue;
+          throw error;
+        }
+
+        if (!inserted) {
+          const { error } = await supabase.from("faturas").insert(basePayload);
+          if (error) throw error;
+        }
       }
       qc.invalidateQueries({ queryKey: ["faturas"] });
+      onReceiptSaved();
       toast({ title: "Fatura paga!" });
       onOpenChange(false);
     } catch (err: unknown) {

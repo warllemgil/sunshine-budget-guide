@@ -47,6 +47,8 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28, initialUrl, mer
   const [logoSrc, setLogoSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(!!store);
+  const candidateUrlsRef = useRef<string[]>([]);
+  const currentCandidateIndexRef = useRef(0);
   // Track any blob URL we created so we can revoke it on cleanup.
   const blobUrlRef = useRef<string | null>(null);
   // Set to true when logoSrc comes from an external API (not local cache or Supabase).
@@ -69,11 +71,27 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28, initialUrl, mer
   const getPreferredFoodDomain = (storeName: string): string | null => {
     const normalized = storeName.trim().toLowerCase();
     const rules: Array<{ pattern: RegExp; domain: string }> = [
+      // Banks and fintechs commonly used in Brazil
+      { pattern: /\bnubank\b|\bnu\b/, domain: "nubank.com.br" },
+      { pattern: /\bcaixa\b|\bcaixa economica\b/, domain: "caixa.gov.br" },
+      { pattern: /\bsantander\b/, domain: "santander.com.br" },
+      { pattern: /\bbradesco\b/, domain: "bradesco.com.br" },
+      { pattern: /\bitau\b|\bita[uú]\b/, domain: "itau.com.br" },
+      { pattern: /\bbanco do brasil\b|\bbb\b/, domain: "bb.com.br" },
+      { pattern: /\binter\b/, domain: "bancointer.com.br" },
+      { pattern: /\bpicpay\b/, domain: "picpay.com" },
+      { pattern: /\bmercado pago\b|\bmercadopago\b/, domain: "mercadopago.com.br" },
+      { pattern: /\bpagbank\b|\bpagseguro\b/, domain: "pagbank.com.br" },
+
+      // Food, delivery and regional apps
       { pattern: /\bifood\b/, domain: "ifood.com.br" },
       { pattern: /\b99\s*food\b|\b99food\b|\b99\s*entrega\b/, domain: "99app.com" },
       { pattern: /\buber\s*eats\b|\bubereats\b/, domain: "ubereats.com" },
       { pattern: /\brappi\b/, domain: "rappi.com.br" },
       { pattern: /\baiqfome\b/, domain: "aiqfome.com" },
+      { pattern: /\bjames\s*delivery\b|\bjames\b/, domain: "jamesdelivery.com.br" },
+      { pattern: /\banota\s*ai\b|\banotai\b/, domain: "anota.ai" },
+      { pattern: /\bze\s*delivery\b|\bz[eé]\s*delivery\b/, domain: "zedelivery.com.br" },
     ];
     const match = rules.find((rule) => rule.pattern.test(normalized));
     return match?.domain ?? null;
@@ -95,6 +113,8 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28, initialUrl, mer
     setFailed(false);
     setLogoSrc(null);
     setLoading(true);
+    candidateUrlsRef.current = [];
+    currentCandidateIndexRef.current = 0;
 
     // ── Fast path: use a pre-resolved URL supplied by the parent ─────────────
     // Blob URLs are session-specific and become invalid after a page refresh.
@@ -161,29 +181,30 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28, initialUrl, mer
       if (cancelled) return;
 
       const clientId = getClientId();
-      let externalUrl: string;
+      let candidates: string[];
       if (domain) {
-        // A real domain was resolved — the CDN/Clearbit URL is a reliable,
-        // persistent logo that is worth uploading to Supabase and saving to DB.
-        externalUrl = clientId
-          ? `https://cdn.brandfetch.io/${domain}/w/56/h/56?c=${clientId}`
-          : `https://logo.clearbit.com/${domain}`;
+        // Try multiple providers for better resilience across Brazilian banks.
+        candidates = [
+          ...(clientId ? [`https://cdn.brandfetch.io/${domain}/w/56/h/56?c=${clientId}`] : []),
+          `https://logo.clearbit.com/${domain}`,
+          `https://icons.duckduckgo.com/ip3/${domain}.ico`,
+          `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`,
+        ];
         isExternalUrlRef.current = true;
       } else {
         // No domain found — use Google Favicon as a best-effort display
         // fallback but do NOT upload or persist the result.  The favicon
         // endpoint uses a store name (not a domain) so results are unreliable
         // and may be a generic globe icon.
-        externalUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(store)}&sz=128`;
+        candidates = [`https://www.google.com/s2/favicons?domain=${encodeURIComponent(store)}&sz=128`];
         isExternalUrlRef.current = false;
       }
 
-      setLogoSrc(externalUrl);
+      const uniqueCandidates = Array.from(new Set(candidates));
+      candidateUrlsRef.current = uniqueCandidates;
+      currentCandidateIndexRef.current = 0;
+      setLogoSrc(uniqueCandidates[0] ?? null);
       setLoading(false);
-      // Only notify the parent (and persist) when we have a domain-resolved URL.
-      if (domain) {
-        onLogoResolvedRef.current?.(externalUrl);
-      }
     })();
 
     return () => {
@@ -196,6 +217,10 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28, initialUrl, mer
   }, [store, initialUrl, merchantId]); // onLogoResolved/onMerchantResolved intentionally omitted — tracked via refs
 
   const handleImageLoad = () => {
+    if (logoSrc) {
+      onLogoResolvedRef.current?.(logoSrc);
+    }
+
     // Only upload to Supabase when the logo was resolved via an external API.
     // Logos already served from Supabase or the local cache skip this step.
     if (!logoSrc || !isExternalUrlRef.current) return;
@@ -213,7 +238,14 @@ const BrandLogo = ({ store, fallbackIcon, fallbackBg, size = 28, initialUrl, mer
   };
 
   const handleError = () => {
-    // All external URLs have been exhausted — show the category icon fallback.
+    const nextIndex = currentCandidateIndexRef.current + 1;
+    if (nextIndex < candidateUrlsRef.current.length) {
+      currentCandidateIndexRef.current = nextIndex;
+      setLogoSrc(candidateUrlsRef.current[nextIndex]);
+      return;
+    }
+
+    // All candidate URLs have been exhausted — show the category icon fallback.
     setFailed(true);
   };
 
