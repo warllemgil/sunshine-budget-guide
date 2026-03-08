@@ -151,12 +151,23 @@ const Dashboard = () => {
   });
 
   const stats = useMemo(() => {
-    const isReceitaLancamento = (l: Tables<"lancamentos">) => l.tipo === "receita";
+    const normalizeTipo = (l: Tables<"lancamentos">): "receita" | "despesa" => {
+      const rawTipo = (l.tipo ?? "").toString().trim().toLowerCase();
+      if (rawTipo === "receita" || rawTipo === "entrada") return "receita";
+      if (rawTipo === "despesa" || rawTipo === "saida") return "despesa";
+
+      // Compatibilidade com dados antigos: em alguns cenarios receitas eram salvas com valor negativo.
+      if (l.valor < 0) return "receita";
+      return "despesa";
+    };
+
+    const isReceitaLancamento = (l: Tables<"lancamentos">) => normalizeTipo(l) === "receita";
     const receitas = lancamentos.filter((l) => isReceitaLancamento(l));
     const despesas = lancamentos.filter((l) => !isReceitaLancamento(l));
     const totalReceita = receitas.reduce((s, l) => s + Math.abs(l.valor), 0);
-    const totalDespesa = despesas.reduce((s, l) => s + l.valor, 0);
+    const totalDespesa = despesas.reduce((s, l) => s + Math.abs(l.valor), 0);
     const fixasReceita = receitas.filter((l) => l.fixa && !l.cartao_id);
+    const variaveisReceita = receitas.filter((l) => !l.fixa && !l.cartao_id);
     const fixasDespesa = despesas.filter((l) => l.fixa && !l.cartao_id);
     const cartaoIds = new Set(cartoes.map((c) => c.id));
     // Only include card expenses that are linked to an existing card
@@ -166,7 +177,7 @@ const Dashboard = () => {
     const orfaos = cartoesLoaded
       ? despesas.filter((l) => !!l.cartao_id && !cartaoIds.has(l.cartao_id))
       : [];
-    return { totalReceita, totalDespesa, fixasReceita, fixasDespesa, cartaoLanc, variaveis, orfaos };
+    return { totalReceita, totalDespesa, fixasReceita, variaveisReceita, fixasDespesa, cartaoLanc, variaveis, orfaos };
   }, [lancamentos, cartoes, cartoesLoaded]);
 
   const saldo = stats.totalReceita - stats.totalDespesa;
@@ -287,6 +298,15 @@ const Dashboard = () => {
       {stats.fixasReceita.length > 0 && (
         <Section title="Entradas Fixas" icon={<TrendingUp className="h-4 w-4 text-success" />}>
           {stats.fixasReceita.map((l) => (
+            <LancamentoRow key={l.id} item={l} onClick={() => openEdit(l)} />
+          ))}
+        </Section>
+      )}
+
+      {/* Entradas Variaveis */}
+      {stats.variaveisReceita.length > 0 && (
+        <Section title="Entradas" icon={<TrendingUp className="h-4 w-4 text-success" />}>
+          {stats.variaveisReceita.map((l) => (
             <LancamentoRow key={l.id} item={l} onClick={() => openEdit(l)} />
           ))}
         </Section>
@@ -594,6 +614,8 @@ const Section = ({ title, icon, children }: { title: string; icon: React.ReactNo
 const LancamentoRow = ({ item, onClick, onReceiptClick }: { item: Tables<"lancamentos">; onClick: () => void; onReceiptClick?: () => void }) => {
   const cat = getCategoriaInfo(item.categoria);
   const Icon = cat.icon;
+  const rawTipo = (item.tipo ?? "").toString().trim().toLowerCase();
+  const isReceita = rawTipo === "receita" || rawTipo === "entrada" || (rawTipo !== "despesa" && rawTipo !== "saida" && item.valor < 0);
   const hasReceipt = !!getDbComprovanteUrl(item) || !!getLocalReceipt(`${LANCAMENTO_RECEIPT_KEY}${item.id}`);
   return (
     <div className="flex w-full items-center gap-2 rounded-lg bg-card border border-border shadow-sm hover:shadow-md transition-shadow">
@@ -609,8 +631,8 @@ const LancamentoRow = ({ item, onClick, onReceiptClick }: { item: Tables<"lancam
           <p className="text-sm font-medium truncate">{item.descricao}</p>
           <p className="text-xs text-muted-foreground">{cat.label}{item.loja ? ` · ${item.loja}` : ""}</p>
         </div>
-        <p className="text-sm font-semibold text-foreground flex-shrink-0">
-          -{formatCurrency(item.valor)}
+        <p className={cn("text-sm font-semibold flex-shrink-0", isReceita ? "text-success" : "text-foreground")}> 
+          {isReceita ? "+" : "-"}{formatCurrency(Math.abs(item.valor))}
         </p>
       </button>
       {onReceiptClick && (
