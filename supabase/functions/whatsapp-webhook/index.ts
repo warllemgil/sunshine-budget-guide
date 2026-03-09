@@ -26,6 +26,7 @@ interface ParsedMessage {
   categoria: string;
   data: string;
   descricao: string;
+  isCartao: boolean;
 }
 
 const jsonResponse = (body: unknown, status = 200): Response =>
@@ -42,6 +43,12 @@ const toE164 = (raw: string | null | undefined): string | null => {
 };
 
 const todayIso = (): string => new Date().toISOString().slice(0, 10);
+
+const normalize = (value: string): string =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 
 const shiftDate = (days: number): string => {
   const d = new Date();
@@ -98,26 +105,138 @@ const detectCategoria = (text: string): string => {
   return "outros";
 };
 
-const detectDescricao = (text: string): string => {
-  const cleaned = text
+const detectDescricaoDespesa = (text: string, loja: string | null): string => {
+  const lower = text.toLowerCase();
+
+  const actionSlice = lower.match(
+    /\b(?:comprei|paguei|gastei|saida|despesa)\s+(.*)$/i,
+  )?.[1] ?? lower;
+
+  const withoutLeadingArticle = actionSlice.replace(/^\s*(?:um|uma|uns|umas|o|a|os|as)\s+/i, "");
+
+  let candidate = withoutLeadingArticle
+    .replace(/\b(?:na|no|em)\s+[a-z0-9][a-z0-9\s\-\.]{1,40}/i, " ")
+    .replace(/\b(?:hoje|ontem|amanha|amanhã)\b/gi, " ")
+    .replace(/\b(?:valor\s+de|valor|de|por)\b/gi, " ")
+    .replace(/\b(?:com|usando)\s+o?\s*cart[aã]o\b.*$/i, " ")
     .replace(/\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?/g, " ")
     .replace(/\d{1,3}(?:\.\d{3})*(?:,\d{1,2})|\d+(?:[\.,]\d{1,2})?/g, " ")
-    .replace(/\b(gastei|paguei|comprei|recebi|ganhei|entrada|saida|despesa|receita)\b/gi, " ")
+    .replace(/\b(?:cart[aã]o|cr[eé]dito|fatura)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  if (!cleaned) return "Lançamento via WhatsApp";
-  return cleaned.length > 120 ? `${cleaned.slice(0, 117)}...` : cleaned;
+  if (loja) {
+    const lojaNorm = normalize(loja);
+    const parts = candidate.split(" ").filter(Boolean);
+    const filtered = parts.filter((p) => normalize(p) !== lojaNorm);
+    candidate = filtered.join(" ").trim();
+  }
+
+  if (!candidate) return "Lançamento via WhatsApp";
+  return candidate.length > 120 ? `${candidate.slice(0, 117)}...` : candidate;
+};
+
+const detectDescricaoReceita = (text: string, loja: string | null): string => {
+  const lower = text.toLowerCase();
+
+  const actionSlice = lower.match(
+    /\b(?:recebi|ganhei|entrada|receita)\s+(.*)$/i,
+  )?.[1] ?? lower;
+
+  let candidate = actionSlice
+    .replace(/\b(?:na|no|em)\s+[a-z0-9][a-z0-9\s\-\.]{1,40}/i, " ")
+    .replace(/\b(?:hoje|ontem|amanha|amanhã)\b/gi, " ")
+    .replace(/\b(?:valor\s+de|valor|de|por)\b/gi, " ")
+    .replace(/\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?/g, " ")
+    .replace(/\d{1,3}(?:\.\d{3})*(?:,\d{1,2})|\d+(?:[\.,]\d{1,2})?/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Prioriza termos comuns de receita quando presentes na frase.
+  const receitaHints = ["salario", "salário", "bico", "extra"];
+  const normalizedCandidate = normalize(candidate);
+  const matchedHint = receitaHints.find((hint) => normalizedCandidate.includes(normalize(hint)));
+  if (matchedHint) {
+    const normalizedHint = normalize(matchedHint);
+    candidate = normalizedHint === "salario" ? "salario" : normalizedHint;
+  }
+
+  if (loja) {
+    const lojaNorm = normalize(loja);
+    const parts = candidate.split(" ").filter(Boolean);
+    const filtered = parts.filter((p) => normalize(p) !== lojaNorm);
+    candidate = filtered.join(" ").trim();
+  }
+
+  if (!candidate) return "Receita via WhatsApp";
+  return candidate.length > 120 ? `${candidate.slice(0, 117)}...` : candidate;
+};
+
+const detectDescricao = (text: string, loja: string | null, tipo: "despesa" | "receita"): string => {
+  if (tipo === "receita") {
+    return detectDescricaoReceita(text, loja);
+  }
+  return detectDescricaoDespesa(text, loja);
+};
+
+const detectIsCartao = (text: string): boolean => {
+  const lower = normalize(text);
+  return ["cartao", "credito", "crédito", "fatura"].some((k) => lower.includes(normalize(k)));
+};
+
+const detectLoja = (text: string): string | null => {
+  const lower = text.toLowerCase();
+  const m = lower.match(
+    /\b(?:na|no|em)\s+([a-z0-9][a-z0-9\s\-\.]{1,40}?)(?=\s+(?:hoje|ontem|amanha|amanhã|valor|de|por|com|usando|cart[aã]o|cr[eé]dito|fatura)\b|$)/i,
+  );
+  if (!m?.[1]) return null;
+
+  const candidate = m[1]
+    .replace(/\b(hoje|ontem|amanha|amanhã|cartao|cartão|credito|crédito)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!candidate) return null;
+  return candidate.length > 80 ? candidate.slice(0, 80) : candidate;
+};
+
+const detectCardId = async (usuarioId: string, text: string): Promise<string | null> => {
+  const normalizedText = normalize(text);
+  const { data: cards, error } = await supabase
+    .from("cartoes")
+    .select("id, nome")
+    .eq("usuario_id", usuarioId);
+
+  if (error || !cards?.length) return null;
+
+  const byFullName = cards.find((c) => normalizedText.includes(normalize(c.nome)));
+  if (byFullName) return byFullName.id;
+
+  for (const card of cards) {
+    const tokens = normalize(card.nome)
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 4);
+
+    if (tokens.some((t) => normalizedText.includes(t))) {
+      return card.id;
+    }
+  }
+
+  return null;
 };
 
 const parseMessage = (text: string): ParsedMessage => {
   const valor = parseAmount(text);
+  const loja = detectLoja(text);
+  const tipo = detectTipo(text);
   return {
     valor,
-    tipo: detectTipo(text),
+    tipo,
     categoria: detectCategoria(text),
     data: parseDate(text),
-    descricao: detectDescricao(text),
+    descricao: detectDescricao(text, loja, tipo),
+    isCartao: detectIsCartao(text),
   };
 };
 
@@ -215,6 +334,12 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
+      const cardId = parsed.tipo === "despesa" && parsed.isCartao
+        ? await detectCardId(linkedUser.usuario_id, textBody)
+        : null;
+
+      const lojaDetectada = detectLoja(textBody);
+
       const { data: lancamento, error: insertError } = await supabase
         .from("lancamentos")
         .insert({
@@ -226,7 +351,8 @@ Deno.serve(async (req: Request) => {
           tipo: parsed.tipo,
           categoria: parsed.categoria,
           fixa: false,
-          loja: parsed.descricao,
+          cartao_id: cardId,
+          loja: lojaDetectada ?? parsed.descricao,
         })
         .select("id")
         .single();
@@ -265,7 +391,7 @@ Deno.serve(async (req: Request) => {
 
       await sendWhatsAppText(
         fromRaw ?? "",
-        `Lancamento criado com sucesso: ${parsed.tipo} de R$ ${parsed.valor.toFixed(2).replace(".", ",")} em ${parsed.categoria}.`,
+        `Lancamento criado com sucesso: ${parsed.tipo} de R$ ${parsed.valor.toFixed(2).replace(".", ",")} em ${parsed.categoria}${cardId ? " no cartao" : ""}.`,
       );
     }
 
